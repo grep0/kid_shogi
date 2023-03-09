@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 string-builder = "0.2.0"
 arrayvec = "0.7.2"
+rand = "0.8.5"

@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use string_builder::Builder;
 use arrayvec::ArrayVec;
 
+use super::abstract_game;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Point(pub usize, pub usize);
 
@@ -458,6 +460,50 @@ impl Position {
     }
 }
 
+impl abstract_game::Position for Position {
+    fn possible_moves(self: &Self) -> Vec<String> {
+        self.list_possible_moves().into_iter().map(|mv| mv.to_fen()).collect()
+    }
+    fn make_move(self: &Self, mvstr: &str) -> Option<Box<dyn abstract_game::Position>> {
+        if let Some(mv) = Move::from_fen(mvstr) {
+            self.make_move(&mv).and_then(|pos| {
+                let bx: Box<dyn abstract_game::Position> = Box::new(pos);
+                Some(bx)
+            })
+        } else {
+            None
+        }
+    }
+    fn to_str(self: &Self) -> String {
+        self.to_fen()
+    }
+    fn is_lost(self: &Self) -> bool {
+        (*self).is_lost()
+    }
+    fn current_player(self: &Self) -> i32 {
+        match self.current_player {
+            Color::Sente => 0,
+            Color::Gote => 1,
+        }
+    }
+}
+
+pub struct PositionFactory{}
+
+impl abstract_game::PositionFactory for PositionFactory {
+    fn game_name(&self) -> &str {
+        "Kids Shogi"
+    }
+    fn initial(&self) -> Box<dyn abstract_game::Position> {
+        Box::from(Position::initial())
+    }
+    fn from_str(&self, s: &str) -> Option<Box<dyn abstract_game::Position>> {
+        Position::from_fen(s).and_then(|pos| {
+            let bx: Box<dyn abstract_game::Position> = Box::new(pos);
+            Some(bx)
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
