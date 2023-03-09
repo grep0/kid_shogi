@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use string_builder::Builder;
+use arrayvec::ArrayVec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Point(pub usize, pub usize);
@@ -109,15 +110,17 @@ impl Color {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Cell {
     Piece(PieceKind, Color),
     Empty,
 }
 
+pub type Cells = ArrayVec<Cell, 12>;
+
 #[derive(Debug, Clone)]
 pub struct Position {
-    cells: Vec<Vec<Cell>>,  // 3x4
+    cells: Cells,
     sente_hand: Vec<PieceKind>,
     gote_hand: Vec<PieceKind>,
     current_player: Color,
@@ -125,15 +128,20 @@ pub struct Position {
 
 impl Position {
     fn find_all_pieces(self: &Self, color: Color) -> Vec<(Point, PieceKind)> {
-        self.cells.iter().enumerate().flat_map(|(x, row)|
-            row.iter().enumerate().filter_map(move |(y, cell)|
-                match cell {
-                    Cell::Piece(pk, c) =>
-                        {if *c==color {Some((Point(x, y), pk.to_owned()))} else {None}},
-                    _ => None
-                }
-            )
+        self.cells.iter().enumerate().filter_map(|(xy, cell)|
+            match cell {
+                Cell::Piece(pk, c) =>
+                    {if *c==color {Some((Position::c_to_p(xy), *pk))} else {None}},
+                _ => None
+            }
         ).collect()
+    }
+    
+    fn c_to_p(coord: usize) -> Point {
+        Point(coord%3, coord/3)
+    }
+    fn p_to_c(p: &Point) -> usize {
+        p.0 + p.1*3
     }
 }
 
@@ -162,23 +170,27 @@ impl Move {
 impl Position {
     pub fn empty() -> Position {
         return Position {
-            cells: vec![vec![Cell::Empty; 4]; 3],
+            cells: Cells::from([Cell::Empty; 12]),
             sente_hand: Vec::new(),
             gote_hand: Vec::new(),
             current_player: Color::Sente
         }
     }
-
+    
     pub fn initial() -> Position {
-        let mut cells = vec![vec![Cell::Empty; 4]; 3];
-        cells[0][0] = Cell::Piece(PieceKind::Elephant, Color::Sente);
-        cells[1][0] = Cell::Piece(PieceKind::Lion, Color::Sente);
-        cells[2][0] = Cell::Piece(PieceKind::Giraffe, Color::Sente);
-        cells[1][1] = Cell::Piece(PieceKind::Chicken, Color::Sente);
-        cells[1][2] = Cell::Piece(PieceKind::Chicken, Color::Gote);
-        cells[2][3] = Cell::Piece(PieceKind::Elephant, Color::Gote);
-        cells[1][3] = Cell::Piece(PieceKind::Lion, Color::Gote);
-        cells[0][3] = Cell::Piece(PieceKind::Giraffe, Color::Gote);
+        let cells = Cells::from([
+            Cell::Piece(PieceKind::Elephant, Color::Sente),
+            Cell::Piece(PieceKind::Lion, Color::Sente),
+            Cell::Piece(PieceKind::Giraffe, Color::Sente),
+            Cell::Empty,
+            Cell::Piece(PieceKind::Chicken, Color::Sente),
+            Cell::Empty,
+            Cell::Empty,
+            Cell::Piece(PieceKind::Chicken, Color::Gote),
+            Cell::Empty,
+            Cell::Piece(PieceKind::Giraffe, Color::Gote),
+            Cell::Piece(PieceKind::Lion, Color::Gote),
+            Cell::Piece(PieceKind::Elephant, Color::Gote)]);
         return Position{
             cells: cells,
             sente_hand: Vec::new(),
@@ -190,13 +202,11 @@ impl Position {
     pub fn swap_sides(self: &Self) -> Position {
         return Position {
             cells: self.cells.iter().rev().map(
-                |row| row.into_iter().rev().map(
-                    |cell|
-                        match cell {
-                            Cell::Empty => Cell::Empty,
-                            Cell::Piece(k, c) => Cell::Piece(*k, c.opponent()),
-                        }).collect()
-                    ).collect(),
+                |cell|
+                    match cell {
+                        Cell::Empty => Cell::Empty,
+                        Cell::Piece(pk, c) => Cell::Piece(*pk, c.opponent()),
+                    }).collect(),
             sente_hand: self.gote_hand.clone(),
             gote_hand: self.sente_hand.clone(),
             current_player: self.current_player.opponent(),
@@ -206,18 +216,18 @@ impl Position {
     fn make_move_sente(self: &Self, mv: &Move) -> Option<Position> {
         match mv {
             Move::Step(from, to) => {
-                let from_cell = &self.cells[from.0][from.1];
+                let from_cell = &self.cells[Position::p_to_c(from)];
                 if let Cell::Piece(pk, Color::Sente) = from_cell {
                     if !pk.is_valid_move(from, to) {
                         return None
                     }
-                    let to_cell = &self.cells[to.0][to.1];
+                    let to_cell = &self.cells[Position::p_to_c(to)];
                     let maybe_promoted = if to.0==3 { pk.promote() } else {*pk};
                     match to_cell {
                         Cell::Empty => {
                             let mut new_cells = self.cells.clone();
-                            new_cells[to.0][to.1] = Cell::Piece(maybe_promoted, Color::Sente);
-                            new_cells[from.0][from.1] = Cell::Empty;
+                            new_cells[Position::p_to_c(to)] = Cell::Piece(maybe_promoted, Color::Sente);
+                            new_cells[Position::p_to_c(from)] = Cell::Empty;
                             return Some(Position {
                                 cells: new_cells,
                                 sente_hand: self.sente_hand.clone(),
@@ -227,8 +237,8 @@ impl Position {
                         }
                         Cell::Piece(qk, Color::Gote) => {
                             let mut new_cells = self.cells.clone();
-                            new_cells[to.0][to.1] = Cell::Piece(maybe_promoted, Color::Sente);
-                            new_cells[from.0][from.1] = Cell::Empty;
+                            new_cells[Position::p_to_c(to)] = Cell::Piece(maybe_promoted, Color::Sente);
+                            new_cells[Position::p_to_c(from)] = Cell::Empty;
                             let mut new_hand = self.sente_hand.clone();
                             new_hand.push(qk.demote());
                             return Some(Position {
@@ -243,12 +253,12 @@ impl Position {
                 }
             }
             Move::Drop(pk, to) => {
-                if let Cell::Piece(_,_) = self.cells[to.0][to.1] {
+                if let Cell::Piece(_,_) = self.cells[Position::p_to_c(to)] {
                     return None  // cannot drop on the head
                 }
                 if let Some(new_hand) = take_piece(&self.sente_hand, *pk) {
                     let mut new_cells = self.cells.clone();
-                    new_cells[to.0][to.1] = Cell::Piece(*pk, Color::Sente);
+                    new_cells[Position::p_to_c(to)] = Cell::Piece(*pk, Color::Sente);
                     return Some(Position {
                         cells: new_cells,
                         sente_hand: new_hand,
@@ -278,15 +288,17 @@ impl Position {
         if self.sente_hand.iter().find(|&v| *v==PieceKind::Lion).is_some() {
             return true;
         }
-        if let Some(x) = self.cells.iter().position(
-                |row| match row[3] {
-                    Cell::Piece(PieceKind::Lion, Color::Sente) => true,
-                    _ => false}) {
-            let opp_position = self.swap_sides();
-            let our_lion_pos = Point(x, 3).swap_sides();
-            // If any opponent's pieces attacks lion, nope
-            let opp_pieces = opp_position.find_all_pieces(Color::Sente);
-            !opp_pieces.into_iter().any(|(pos, pk)| pk.is_valid_move(&pos, &our_lion_pos))
+        if let Some(xy) = self.cells.iter().position(|v| *v == Cell::Piece(PieceKind::Lion, Color::Sente)) {
+            let our_lion_pos = Position::c_to_p(xy);
+            if our_lion_pos.1==3 {
+                // If any opponent's pieces attacks our lion, nope
+                let opp_pieces = self.find_all_pieces(Color::Sente);
+                !opp_pieces.into_iter().any(
+                    |(pos, pk)|
+                        pk.is_valid_move(&pos.swap_sides(), &our_lion_pos.swap_sides()))
+            } else {
+                false
+            }
         } else {
             false
         }
@@ -309,10 +321,11 @@ impl Position {
                         .map(move |p| Move::Step(point, p)))
             .collect::<Vec<Move>>();
         let uniq_drops = self.sente_hand.iter().collect::<HashSet<_>>();
-        let empty_loc = (0..3).into_iter().flat_map(
-            |x| (0..4).into_iter().filter(move |&y| match self.cells[x][y] {Cell::Empty => true, _ => false})
-                .map(move |y| Point(x,y)))
-            .collect::<Vec<_>>();
+        let empty_loc = (0..12).into_iter().filter_map(
+            |xy| match self.cells[xy] {
+                Cell::Empty => Some(Position::c_to_p(xy)),
+                _ => None
+            }).collect::<Vec<_>>();
         let drops = uniq_drops.into_iter()
             .flat_map(|&pk| empty_loc.iter().map(move |&p| Move::Drop(pk, p)))
             .collect::<Vec<_>>();
@@ -334,7 +347,7 @@ impl Position {
             let mut empties=0;
             if y!=3 {res.append('/')}
             for x in 0..3 {
-                match self.cells[x][y] {
+                match self.cells[Position::p_to_c(&Point(x,y))] {
                     Cell::Empty => { empties+=1 }
                     Cell::Piece(pk, color) => {
                         if empties>0 { res.append(empties.to_string()) }
@@ -375,12 +388,12 @@ impl Position {
                     x += c.to_digit(10).unwrap() as usize
                 } else if c.is_ascii_lowercase() {
                     if let Some(pk) = PieceKind::from_fen_char(c) {
-                        pos.cells[x][y] = Cell::Piece(pk, Color::Gote);
+                        pos.cells[Position::p_to_c(&Point(x,y))] = Cell::Piece(pk, Color::Gote);
                         x += 1
                     } else { return None }
                 } else if c.is_ascii_uppercase() {
                     if let Some(pk) = PieceKind::from_fen_char(c.to_ascii_lowercase()) {
-                        pos.cells[x][y] = Cell::Piece(pk, Color::Sente);
+                        pos.cells[Position::p_to_c(&Point(x,y))] = Cell::Piece(pk, Color::Sente);
                         x += 1
                     }
                 } else { return None }
