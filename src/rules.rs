@@ -15,6 +15,18 @@ impl Point {
     fn is_within_boundaries(self: &Self) -> bool {
         self.0<3 && self.1<4
     }
+
+    fn to_fen(self: &Self) -> String {
+        [(self.0 as u8 + 'a' as u8) as char, (self.1 as u8 + '1' as u8) as char].iter().collect()
+    }
+
+    fn from_fen(s: &str) -> Option<Point> {
+        if s.len() !=2 { return None }
+        let x = s.chars().nth(0).unwrap() as u8 - 'a' as u8;
+        let y = s.chars().nth(1).unwrap() as u8 - '1' as u8;
+        let p = Point(x as usize, y as usize);
+        if p.is_within_boundaries() {Some(p)} else {None}
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -152,7 +164,7 @@ fn take_piece(hand: &[PieceKind], pk: PieceKind) -> Option<Vec<PieceKind>> {
     return None // TODO
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Move {
     Step(Point, Point),
     Drop(PieceKind, Point),
@@ -164,6 +176,31 @@ impl Move {
             Move::Step(from, to) => Move::Step(from.swap_sides(), to.swap_sides()),
             Move::Drop(pk,to) => Move::Drop(*pk, to.swap_sides()),
         }
+    }
+
+    fn to_fen(self:&Self) -> String {
+        match self {
+            Move::Step(from, to) => from.to_fen() + &to.to_fen(),
+            Move::Drop(pk, to) => format!("{}*{}", pk.to_fen_char().to_ascii_uppercase(), to.to_fen()),
+        }
+    }
+
+    fn from_fen(s:&str) -> Option<Move> {
+        if s.len()!=4 { return None }
+        if s.chars().nth(1).unwrap()=='*' {
+            if let Some(pk) = PieceKind::from_fen_char(s.chars().nth(0).unwrap().to_ascii_lowercase()) {
+                if let Some(to) = Point::from_fen(&s[2..]) {
+                    return Some(Move::Drop(pk, to))
+                }
+            }
+        } else {
+            if let Some(from) = Point::from_fen(&s[0..2]) {
+                if let Some(to) = Point::from_fen(&s[2..]) {
+                    return Some(Move::Step(from, to))
+                }
+            }
+        }
+        None
     }
 }
 
@@ -432,6 +469,24 @@ mod tests {
         assert_eq!(Point(0,0).swap_sides(), Point(2,3));
         assert_eq!(Point(1,1).swap_sides(), Point(1,2));
         assert_eq!(Point(1,2).swap_sides(), Point(1,1));
+    }
+
+    #[test]
+    fn point_fen() {
+        assert_eq!(Point(2,3).to_fen(), "c4");
+        assert_eq!(Point(0,0).to_fen(), "a1");
+        assert_eq!(Point::from_fen("a1").unwrap(), Point(0,0));
+        assert_eq!(Point::from_fen("c4").unwrap(), Point(2,3));
+    }
+
+    #[test]
+    fn move_fen() {
+        let step = Move::Step(Point(0,0), Point(0,1));
+        assert_eq!(step.to_fen(), "a1a2");
+        assert_eq!(Move::from_fen("a1a2").unwrap(), step);
+        let drop = Move::Drop(PieceKind::Chicken, Point(2,1));
+        assert_eq!(drop.to_fen(), "C*c2");
+        assert_eq!(Move::from_fen("C*c2").unwrap(), drop);
     }
 
     #[test]
