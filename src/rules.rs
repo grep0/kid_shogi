@@ -259,7 +259,7 @@ impl Position {
                         return None
                     }
                     let to_cell = &self.cells[Position::p_to_c(to)];
-                    let maybe_promoted = if to.0==3 { pk.promote() } else {*pk};
+                    let maybe_promoted = if to.1==3 { pk.promote() } else {*pk};
                     match to_cell {
                         Cell::Empty => {
                             let mut new_cells = self.cells.clone();
@@ -329,7 +329,7 @@ impl Position {
             let our_lion_pos = Position::c_to_p(xy);
             if our_lion_pos.1==3 {
                 // If any opponent's pieces attacks our lion, nope
-                let opp_pieces = self.find_all_pieces(Color::Sente);
+                let opp_pieces = self.find_all_pieces(Color::Gote);
                 !opp_pieces.into_iter().any(
                     |(pos, pk)|
                         pk.is_valid_move(&pos.swap_sides(), &our_lion_pos.swap_sides()))
@@ -341,10 +341,10 @@ impl Position {
         }
     }
 
-    pub fn is_winning(self: &Self) -> bool {
+    pub fn is_lost(self: &Self) -> bool {
         match self.current_player {
-            Color::Sente => { self.is_winning_sente() },
-            Color::Gote => { self.swap_sides().is_winning_sente() },
+            Color::Gote => { self.is_winning_sente() },
+            Color::Sente => { self.swap_sides().is_winning_sente() },
         }
     }
 
@@ -520,10 +520,58 @@ mod tests {
     }
 
     #[test]
-    fn from_fen() {
+    fn pos_from_fen() {
         let fen = "gl1/1e1/3/ELG b Cc";
         let pos = Position::from_fen(fen).unwrap();
-        println!("{:?}", pos);
         assert_eq!(pos.to_fen(), fen);
+    }
+
+    #[test]
+    fn chicken_promotion() {
+        let pos = Position::from_fen("l2/2C/3/L2 b -").unwrap();
+        let mv = Move::Step(Point(2,2), Point(2,3));
+        let pos2 = pos.make_move(&mv).unwrap();
+        assert_eq!(pos2.to_fen(), "l1H/3/3/L2 w -")
+    }
+
+    #[test]
+    fn demote_on_capture() {
+        let pos = Position::from_fen("l2/2h/2C/L2 b -").unwrap();
+        let mv = Move::from_fen("c2c3").unwrap();
+        let pos2 = pos.make_move(&mv).unwrap();
+        assert_eq!(pos2.to_fen(), "l2/2C/3/L2 w C")
+    }
+
+    #[test]
+    fn win_sente_on_lion_capture() {
+        let pos = Position::from_fen("l2/G2/3/L2 b -").unwrap();
+        let mv = Move::from_fen("a3a4").unwrap();
+        let pos2 = pos.make_move(&mv).unwrap();
+        assert!(pos2.is_lost());
+    }
+
+    #[test]
+    fn win_on_lion_passed() {
+        let pos = Position::from_fen("l2/G1L/3/3 b -").unwrap();
+        let mv = Move::from_fen("c3c4").unwrap();
+        let pos2 = pos.make_move(&mv).unwrap();
+        assert!(pos2.is_lost());
+    }
+
+    #[test]
+    fn no_win_on_lion_passed_under_attack() {
+        let pos = Position::from_fen("lg1/G1L/3/3 b -").unwrap();
+        let mv = Move::from_fen("c3c4").unwrap();
+        let pos2 = pos.make_move(&mv).unwrap();
+        println!("{}", pos2.to_fen());
+        assert!(!pos2.is_lost());
+    }
+
+    #[test]
+    fn win_gote_on_lion_capture() {
+        let pos = Position::from_fen("l2/G2/1e1/L2 w -").unwrap();
+        let mv = Move::from_fen("b2a1").unwrap();
+        let pos2 = pos.make_move(&mv).unwrap();
+        assert!(pos2.is_lost());
     }
 }
