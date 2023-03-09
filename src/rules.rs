@@ -76,7 +76,7 @@ impl PieceKind {
             PieceKind::Elephant => &[(-1,-1), (-1,1), (1,-1), (1,1)],
             PieceKind::Giraffe => &[(-1,0), (0,-1), (0,1), (1,0)],
             PieceKind::Lion => &[(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)],
-            PieceKind::Hen => &[(-1,0), (0,-1), (0,1), (1,-1), (1,0), (1,1)],
+            PieceKind::Hen => &[(0,-1), (-1,0), (1,0), (-1,1), (0,1), (1,1)],
         };
         deltas.into_iter()
             .map(|&(dx,dy)| (from.0 as isize+dx, from.1 as isize+dy))
@@ -358,8 +358,8 @@ impl Position {
                         .map(move |p| Move::Step(point, p)))
             .collect::<Vec<Move>>();
         let uniq_drops = self.sente_hand.iter().collect::<HashSet<_>>();
-        let empty_loc = (0..12).into_iter().filter_map(
-            |xy| match self.cells[xy] {
+        let empty_loc = self.cells.iter().enumerate().filter_map(
+            |(xy, &cell)| match cell {
                 Cell::Empty => Some(Position::c_to_p(xy)),
                 _ => None
             }).collect::<Vec<_>>();
@@ -563,7 +563,6 @@ mod tests {
         let pos = Position::from_fen("lg1/G1L/3/3 b -").unwrap();
         let mv = Move::from_fen("c3c4").unwrap();
         let pos2 = pos.make_move(&mv).unwrap();
-        println!("{}", pos2.to_fen());
         assert!(!pos2.is_lost());
     }
 
@@ -573,5 +572,123 @@ mod tests {
         let mv = Move::from_fen("b2a1").unwrap();
         let pos2 = pos.make_move(&mv).unwrap();
         assert!(pos2.is_lost());
+    }
+
+    #[test]
+    fn possible_moves_with_drops_sente() {
+        let pos = Position::from_fen("1l1/ge1/1C1/ELG b C").unwrap();
+        let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
+        moves.sort();
+        let mut expected_moves = vec![
+            // giraffe
+            "c1c2",
+            // lion
+            "b1a2", "b1c2",
+            // elephant (none)
+            // chicken
+            "b2b3",
+            // drops
+            "C*a2", "C*c2", "C*c3", "C*a4", "C*c4",
+        ];
+        expected_moves.sort();
+        assert_eq!(moves, expected_moves);
+    }
+
+    #[test]
+    fn possible_moves_with_drops_gote() {
+        let pos = Position::from_fen("1l1/ge1/1C1/ELG w c").unwrap();
+        let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
+        moves.sort();
+        let mut expected_moves = vec![
+            // giraffe
+            "a3a2", "a3a4",
+            // lion
+            "b4a4", "b4c4", "b4c3",
+            // elephant
+            "b3a2", "b3a4", "b3c2", "b3c4",
+            // drops
+            "C*a2", "C*a4", "C*c2", "C*c3", "C*c4",
+        ];
+        expected_moves.sort();
+        assert_eq!(moves, expected_moves);
+    }
+
+    #[test]
+    fn chicken_moves() {
+        let pos = Position::from_fen("3/3/1C1/3 b -").unwrap();
+        let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
+        moves.sort();
+        let mut expected_moves = vec![
+            "b2b3",
+        ];
+        expected_moves.sort();
+        assert_eq!(moves, expected_moves);
+    }
+
+    #[test]
+    fn giraffe_moves() {
+        let pos = Position::from_fen("3/3/1G1/3 b -").unwrap();
+        let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
+        moves.sort();
+        let mut expected_moves = vec![
+            "b2b1", "b2a2", "b2c2", "b2b3",
+        ];
+        expected_moves.sort();
+        assert_eq!(moves, expected_moves);
+    }
+
+    #[test]
+    fn elephant_moves() {
+        let pos = Position::from_fen("3/3/1E1/3 b -").unwrap();
+        let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
+        moves.sort();
+        let mut expected_moves = vec![
+            "b2a1", "b2a3", "b2c1", "b2c3",
+        ];
+        expected_moves.sort();
+        assert_eq!(moves, expected_moves);
+    }
+
+    #[test]
+    fn lion_moves() {
+        let pos = Position::from_fen("3/3/1L1/3 b -").unwrap();
+        let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
+        moves.sort();
+        let mut expected_moves = vec![
+            "b2a1", "b2a2", "b2a3", "b2b1", "b2b3", "b2c1", "b2c2", "b2c3",
+        ];
+        expected_moves.sort();
+        assert_eq!(moves, expected_moves);
+    }
+
+    #[test]
+    fn hen_moves() {
+        let pos = Position::from_fen("3/3/1H1/3 b -").unwrap();
+        let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
+        moves.sort();
+        let mut expected_moves = vec![
+            "b2b1", "b2a2", "b2c2", "b2a3", "b2b3", "b2c3",
+        ];
+        expected_moves.sort();
+        assert_eq!(moves, expected_moves);
+    }
+
+    #[test]
+    fn invalid_moves() {
+        let pos = Position::from_fen("1l1/ge1/1C1/ELG b C").unwrap();
+        // from empty
+        assert!(pos.make_move(&Move::Step(Point(2,1), Point(2,2))).is_none());
+        // from enemy location
+        assert!(pos.make_move(&Move::Step(Point(1,3), Point(0,3))).is_none());
+        // wrong direction for this piece
+        assert!(pos.make_move(&Move::Step(Point(1,1), Point(0,1))).is_none());
+        // on top of your own piece
+        assert!(pos.make_move(&Move::Step(Point(1,0), Point(1,1))).is_none());
+        // drop of absent piece
+        assert!(pos.make_move(&Move::Drop(PieceKind::Giraffe, Point(0,1))).is_none());
+        // drop on your own piece
+        assert!(pos.make_move(&Move::Drop(PieceKind::Chicken, Point(0,0))).is_none());
+        // drop on opponent's head
+        assert!(pos.make_move(&Move::Drop(PieceKind::Chicken, Point(1,3))).is_none());
     }
 }
