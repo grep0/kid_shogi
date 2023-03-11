@@ -1,4 +1,5 @@
 use super::*;
+use crate::abstract_game::{Position as AGPosition, Evaluator};
 
 #[test]
 fn point_swap_sides() {
@@ -227,4 +228,29 @@ fn invalid_moves() {
     assert!(pos.make_move(&Move::Drop(PieceKind::Chicken, Point(0,0))).is_none());
     // drop on opponent's head
     assert!(pos.make_move(&Move::Drop(PieceKind::Chicken, Point(1,3))).is_none());
+}
+
+#[test]
+fn encode_hand() {
+    let fen = "gl1/1e1/3/ELG b Cc";
+    let pos = Position::from_fen(fen).unwrap();
+    
+    let encoded = pos.encode();
+    println!("{:?}", encoded);
+    assert_eq!(encoded.len(), 12*10 + 6*2);
+    assert_eq!(encoded.iter().fold(0.0, |acc,x| acc+x), 8.0);  // each piece makes one 1.0
+    assert_eq!(encoded[1], 1.0);  // sente elephant at (0,0)
+    assert_eq!(encoded[9*10+2+5], 1.0);  // gote giraffe at (3,0)
+    assert_eq!(encoded[12*10], 1.0);  // sente chicken in hand
+    assert_eq!(encoded[12*10+6], 1.0);  // gote chicken in hand
+}
+
+#[test]
+fn simple_evaluator() {
+    let pos = Position::from_fen("gl1/1e1/3/ELG b Cc").unwrap();
+    let eval = SimpleEvaluator{};
+    assert_eq!(eval.evaluate_position(&pos), 0.0);  // equal material
+
+    let pos2 = Position::from_fen("gle/1C1/3/ELG w C").unwrap();
+    assert_eq!(eval.evaluate_position(&pos2), -1.0);  // opponent captured a chicken
 }

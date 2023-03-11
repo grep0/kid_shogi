@@ -1,14 +1,18 @@
-// Basic strategy engine
-use super::abstract_game::Position;
+use std::collections::HashMap;
 
-use rand::Rng;
+// Basic strategy engine
+use super::abstract_game::{Position, Evaluator};
+
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
+use rand::distributions::WeightedIndex;
 
 pub trait StrategyEngine {
     fn choose_move(&mut self, pos: &dyn Position) -> Option<String>; 
 }
 
-struct RandomMoveStrategy {
-    rng : rand::rngs::StdRng,
+pub struct RandomMoveStrategy {
+    rng : StdRng,
 }
 
 impl StrategyEngine for RandomMoveStrategy {
@@ -23,8 +27,14 @@ impl StrategyEngine for RandomMoveStrategy {
     }
 }
 
-struct FindWinningMoveStrategy<FollowupStrategy: StrategyEngine> {
+pub struct FindWinningMoveStrategy<FollowupStrategy: StrategyEngine> {
     followup: FollowupStrategy,
+}
+
+impl<F: StrategyEngine> FindWinningMoveStrategy<F> {
+    pub fn new(f: F) -> Self {
+        FindWinningMoveStrategy { followup: f }
+    }
 }
 
 impl<F: StrategyEngine> StrategyEngine for FindWinningMoveStrategy<F> {
@@ -40,19 +50,86 @@ impl<F: StrategyEngine> StrategyEngine for FindWinningMoveStrategy<F> {
     }
 }
 
+pub struct OneStepEvaluator {}
+
+impl OneStepEvaluator {
+    const SATURATION : f64 = 10.0;
+}
+
+impl Evaluator for OneStepEvaluator {
+    fn saturation(&self) -> f64 {
+        Self::SATURATION
+    }
+    fn evaluate_position(&self, pos: &dyn Position) -> f64 {
+        if pos.is_lost() {
+            return -Self::SATURATION
+        }
+        let moves = pos.possible_moves();
+        if moves.iter().any(|mv| pos.make_move(&mv).and_then(
+            |pos1| Some(pos1.is_lost())).unwrap_or(false)) {
+            return Self::SATURATION
+        }
+        0.0
+    }
+}
+
+pub struct SoftMaxStrategy<'a, Eval: Evaluator> {
+    rng: StdRng,
+    eval: &'a Eval,
+}
+
+impl<'a, E: Evaluator> SoftMaxStrategy<'a, E> {
+    pub fn new(e: &'a E) -> Self {
+        SoftMaxStrategy{
+            eval: e,
+            rng: StdRng::from_entropy(),
+        }
+    }
+
+    pub fn multi_choose_move(&mut self, pos: &dyn Position, count: usize) -> HashMap<String, usize> {
+        let moves = pos.possible_moves();
+        if moves.is_empty() { return HashMap::new() }
+        let values = moves.iter().map(
+            |mv| -self.eval.evaluate_position(pos.make_move(mv).unwrap().as_ref()))
+            .map(|v| v.exp())
+            .collect::<Vec<f64>>();
+        let sum = values.iter().fold(0.0, |acc,x| acc+x);
+        let weights = values.iter().map(|v| ((v * 1000000.0)/sum) as i32).collect::<Vec<_>>();
+        println!("# moves {:?} weights {:?}", moves, weights);
+        let wi = WeightedIndex::new(&weights[..]).unwrap();
+        let mut res = HashMap::<String, usize>::new();
+        for _ in 0..count {
+            let k = moves[self.rng.sample(&wi)].clone();
+            if let Some(it) = res.get_mut(&k) {
+                *it += 1
+            } else {
+                res.insert(k, 1);
+            }
+        }
+        res
+    }
+}
+
+impl<'a, E: Evaluator> StrategyEngine for SoftMaxStrategy<'a, E> {
+    fn choose_move(&mut self, pos: &dyn Position) -> Option<String> {
+        let multi = self.multi_choose_move(pos, 1);
+        multi.keys().into_iter().next().map(|k| k.clone())
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use crate::abstract_game::{tests as agt, PositionFactory};
     use rand::SeedableRng;
 
-    use super::{RandomMoveStrategy, StrategyEngine, FindWinningMoveStrategy};
+    use super::*;
 
     #[test]
     fn random_move_strategy() {
         let fac = agt::OneTwoGameFactory{};
         let g = fac.from_str("5 0").unwrap();
         let mut strategy = RandomMoveStrategy {
-            rng: rand::rngs::StdRng::seed_from_u64(32)
+            rng: StdRng::seed_from_u64(32)
         };
         assert_eq!(strategy.choose_move(g.as_ref()).unwrap(), "1")
     }
@@ -84,4 +161,15 @@ pub mod tests {
         assert_eq!(strategy.choose_move(g2.as_ref()).unwrap(), "2");
     }
 
+    #[test]
+    fn one_step_evaluator() {
+        let fac = agt::OneTwoGameFactory{};
+        let eval = OneStepEvaluator{};
+        let lost = fac.from_str("0 0").unwrap();
+        assert_eq!(eval.evaluate_position(lost.as_ref()), -eval.saturation());
+        let won = fac.from_str("2 0").unwrap();
+        assert_eq!(eval.evaluate_position(won.as_ref()), eval.saturation());
+        let undecided = fac.initial();
+        assert_eq!(eval.evaluate_position(undecided.as_ref()), 0.0);
+    }
 }

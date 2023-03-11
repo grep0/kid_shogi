@@ -1,13 +1,19 @@
 #![allow(dead_code)]
 
-use std::collections::HashSet;
+use std::{collections::HashSet};
 use string_builder::Builder;
 use arrayvec::ArrayVec;
 
-use super::abstract_game;
+use super::abstract_game as ag;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Point(pub usize, pub usize);
+
+fn minus_with_boundaries(a: u8, b:u8, high:u8) -> Option<u8> {
+    if a<b { None }
+    else if a-b>=high { None }
+    else { Some(a-b) }
+}
 
 impl Point {
     fn swap_sides(self: &Self) -> Point {
@@ -24,18 +30,18 @@ impl Point {
 
     fn from_fen(s: &str) -> Option<Point> {
         if s.len() !=2 { return None }
-        let x = s.chars().nth(0).unwrap() as u8 - 'a' as u8;
-        let y = s.chars().nth(1).unwrap() as u8 - '1' as u8;
-        let p = Point(x as usize, y as usize);
-        if p.is_within_boundaries() {Some(p)} else {None}
+        let x = minus_with_boundaries(s.chars().nth(0).unwrap() as u8, 'a' as u8, 3);
+        let y = minus_with_boundaries(s.chars().nth(1).unwrap() as u8 ,'1' as u8, 4);
+        if x.is_none() || y.is_none() { return None }
+        Some(Point(x.unwrap() as usize, y.unwrap() as usize))
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PieceKind {
     Chicken,
-    Giraffe,
     Elephant,
+    Giraffe,
     Hen,
     Lion,
 }
@@ -45,6 +51,8 @@ fn diff(a: usize, b: usize) -> isize {
 }
 
 impl PieceKind {
+    const COUNT: usize = 5;
+
     pub fn promote(self: &Self) -> PieceKind {
         match self {
             PieceKind::Chicken => PieceKind::Hen,
@@ -86,6 +94,16 @@ impl PieceKind {
             .map(|(x,y)| Point(x as usize, y as usize)).collect()
     }
 
+    fn index(self: &Self) -> usize {
+        match self {
+            PieceKind::Chicken => 0,
+            PieceKind::Elephant => 1,
+            PieceKind::Giraffe => 2,
+            PieceKind::Hen => 3,
+            PieceKind::Lion => 4,
+        }
+    }
+
     fn to_fen_char(self: &Self) -> char {
         match self {
             PieceKind::Chicken => 'c',
@@ -116,6 +134,13 @@ pub enum Color {
 }
 
 impl Color {
+    pub fn index(self: &Self) -> usize {
+        match self {
+            Color::Sente => 0,
+            Color::Gote => 1,
+        }
+    }
+
     pub fn opponent(self: &Self) -> Color {
         match self {
             Color::Sente => Color::Gote,
@@ -460,14 +485,14 @@ impl Position {
     }
 }
 
-impl abstract_game::Position for Position {
+impl ag::Position for Position {
     fn possible_moves(self: &Self) -> Vec<String> {
         self.list_possible_moves().into_iter().map(|mv| mv.to_fen()).collect()
     }
-    fn make_move(self: &Self, mvstr: &str) -> Option<Box<dyn abstract_game::Position>> {
+    fn make_move(self: &Self, mvstr: &str) -> Option<Box<dyn ag::Position>> {
         if let Some(mv) = Move::from_fen(mvstr) {
             self.make_move(&mv).and_then(|pos| {
-                let bx: Box<dyn abstract_game::Position> = Box::new(pos);
+                let bx: Box<dyn ag::Position> = Box::new(pos);
                 Some(bx)
             })
         } else {
@@ -486,22 +511,91 @@ impl abstract_game::Position for Position {
             Color::Gote => 1,
         }
     }
+    fn encode(self: &Self) -> Vec<f64> {
+        fn delta(size: usize, pos: usize) -> Vec<f64> {
+            let mut d = vec![0.0; size];
+            d[pos] = 1.0;
+            d
+        }
+        fn encode_hand(h: &[PieceKind]) -> Vec<f64> {
+            let mut v = vec![0.0; 6];
+            let mut curh = Vec::from(h);
+            for pk in [PieceKind::Chicken, PieceKind::Elephant, PieceKind::Giraffe] {
+                for i in 0..2 {  // max 2 pieces of any kind in hand
+                    if let Some(nexth) = take_piece(&curh, pk) {
+                        curh = nexth;
+                        v[pk.index()*2 + i] = 1.0
+                    }
+                }
+            }
+            v
+        }
+        let mut field: Vec<f64> = self.cells.iter().map(
+            |cell| match cell {
+                Cell::Empty => vec![0.0; PieceKind::COUNT*2],
+                Cell::Piece(pk, c) =>
+                        delta(PieceKind::COUNT*2, pk.index() + c.index()*PieceKind::COUNT),
+            }.into_iter()).flatten().collect();
+        field.append(&mut encode_hand(&self.sente_hand));
+        field.append(&mut encode_hand(&self.gote_hand));
+        field
+    }
+
+    fn as_any(self: &Self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 pub struct PositionFactory{}
 
-impl abstract_game::PositionFactory for PositionFactory {
+impl ag::PositionFactory for PositionFactory {
     fn game_name(&self) -> &str {
         "Kids Shogi"
     }
-    fn initial(&self) -> Box<dyn abstract_game::Position> {
+    fn initial(&self) -> Box<dyn ag::Position> {
         Box::from(Position::initial())
     }
-    fn from_str(&self, s: &str) -> Option<Box<dyn abstract_game::Position>> {
+    fn from_str(&self, s: &str) -> Option<Box<dyn ag::Position>> {
         Position::from_fen(s).and_then(|pos| {
-            let bx: Box<dyn abstract_game::Position> = Box::new(pos);
+            let bx: Box<dyn ag::Position> = Box::new(pos);
             Some(bx)
         })
+    }
+}
+
+// Simple evaluator counts the values of pieces on board and in hand 
+// c=1, g=e=3, h=5
+pub struct SimpleEvaluator {}
+
+impl ag::Evaluator for SimpleEvaluator {
+    fn saturation(&self) -> f64 {
+        100.0
+    }
+    fn evaluate_position(&self, abstract_pos: &dyn ag::Position) -> f64 {
+        let pos = abstract_pos.as_any().downcast_ref::<Position>()
+            .expect("must be KidsShogi position");
+        if pos.is_lost() { return -self.saturation() }
+        fn piece_value(pk: &PieceKind) -> i32 {
+            match pk {
+                PieceKind::Chicken => 1,
+                PieceKind::Elephant => 3,
+                PieceKind::Giraffe => 3,
+                PieceKind::Hen => 5,
+                PieceKind::Lion => 20,  // fake
+            }
+        }
+        let score_by_board: i32 = pos.cells.iter().map(|cell| match cell {
+            Cell::Piece(pk, c) => {
+                let pm = piece_value(pk);
+                let cm = if *c==Color::Sente {1} else {-1};
+                pm*cm
+            },
+            _ => 0,
+        }).sum();
+        let score_sente_hand: i32 = pos.sente_hand.iter().map(|pk| piece_value(pk)).sum();
+        let score_gote_hand: i32 = pos.gote_hand.iter().map(|pk| piece_value(pk)).sum();
+        let mult = if pos.current_player==Color::Sente {1} else {-1};
+        ((score_by_board + score_sente_hand - score_gote_hand)*mult) as f64*0.5
     }
 }
 

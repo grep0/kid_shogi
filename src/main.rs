@@ -1,21 +1,50 @@
+use abstract_game::PositionFactory;
+
+use crate::{abstract_game::Position, strategy::StrategyEngine};
+use std::io::{self, stdin, stdout, Write};
+
 mod kids_shogi;
 mod abstract_game;
 mod strategy;
+mod neuro;
+mod mcts;
 
 fn main() {
-    let pos = kids_shogi::Position::initial();
-    println!("{:?}", pos);
-    println!("{}", pos.to_fen());
-    let mv1 = kids_shogi::Move::Step(kids_shogi::Point(1,1), kids_shogi::Point(1,2));
-    let pos1 = pos.make_move(&mv1).unwrap();
-    println!("{:?}", pos1);
-    println!("{}", pos1.to_fen());
-    let mv2 = kids_shogi::Move::Step(kids_shogi::Point(2,3), kids_shogi::Point(1,2));
-    let pos2 = pos1.make_move(&mv2).unwrap();
-    println!("{:?}", pos2);
-    println!("{}", pos2.to_fen());
-    let mv3 = kids_shogi::Move::Drop(kids_shogi::PieceKind::Chicken, kids_shogi::Point(1,1));
-    let pos3 = pos2.make_move(&mv3).unwrap();
-    println!("{:?}", pos3);
-    println!("{}", pos3.to_fen());
+    let evaluator = kids_shogi::SimpleEvaluator{};
+    let mut strat = mcts::MonteCarloTreeSearchStrategy::new(evaluator, 30);
+
+    let game_factory = kids_shogi::PositionFactory{};
+    let mut pos = game_factory.initial();
+    while !pos.is_lost() {
+        println!("{:?}", pos.to_str());
+        let mv = match pos.current_player() {
+            0 => {
+                loop {
+                    print!("Sente move> ");
+                    stdout().flush().expect("oops flush");
+                    let mut buf = String::new();
+                    stdin().read_line(&mut buf).expect("failed to read line");
+                    let mv = buf.trim();
+                    if mv.is_empty() {
+                        break None
+                    }
+                    let new_pos_or = pos.make_move(mv);
+                    if new_pos_or.is_some() {
+                        break Some(mv.to_string())
+                    }
+                }
+            }
+            1 => {
+                let mv = strat.choose_move(pos.as_ref());
+                println!("Gote move> {}", mv.clone().unwrap_or("???".to_string()));
+                mv
+            }
+            _ => panic!("what a player")
+        };
+        if mv.is_none() {
+            println!("Game ended for some weird reason");
+            break
+        }
+        pos = pos.make_move(&mv.unwrap()).expect("must be a valid move");
+    }
 }

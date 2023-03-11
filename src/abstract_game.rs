@@ -1,11 +1,22 @@
 // Traits describing abstract game
 
+use std::any::Any;
+
 pub trait Position {
     fn possible_moves(self: &Self) -> Vec<String>;
     fn make_move(self: &Self, mv: &str) -> Option<Box<dyn Position>>;
     fn to_str(self: &Self) -> String;
     fn is_lost(self: &Self) -> bool;
     fn current_player(self: &Self) -> i32;  // actually 0 or 1
+    fn encode(self: &Self) -> Vec<f64>;
+    fn as_any(self: &Self) -> &dyn Any;  // for downcasting
+}
+
+pub trait Evaluator {
+    fn evaluate_position(&self, pos: &dyn Position) -> f64;
+    // Return saturation value for this evaluator; if ±saturation is returned,
+    // evaluator believes that the position is won/lost
+    fn saturation(&self) -> f64;
 }
 
 pub trait PositionFactory {
@@ -30,7 +41,7 @@ pub mod tests {
         fn make_move(self: &Self, mv: &str) -> Option<Box<dyn Position>> {
             if let Ok(m) = mv.parse::<i32>() {
                 if m!=1 && m!=2 { return None }
-                if m<self.value { return None }
+                if m>self.value { return None }
                 let bx: Box::<dyn Position> = Box::new(
                     OneTwoGamePosition{value: self.value-m, player: 1-self.player });
                 return Some(bx);
@@ -46,6 +57,12 @@ pub mod tests {
         }
         fn possible_moves(self: &Self) -> Vec<String> {
             (1..=std::cmp::min(2,self.value)).into_iter().map(|v| v.to_string()).collect()
+        }
+        fn encode(self: &Self) -> Vec<f64> {
+            vec![self.value as f64]
+        }
+        fn as_any(self: &Self) -> &dyn Any {
+            self
         }
     }
 
