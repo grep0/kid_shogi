@@ -560,7 +560,7 @@ impl ag::Position for Position {
         lines[0].push_str(" ]");
         lines[3].push_str(" [ ");
         lines[3].extend(self.sente_hand.iter().map(|pt| pt.to_fen_char().to_ascii_uppercase()));
-        lines[3].push_str((" ]"));
+        lines[3].push_str(" ]");
         lines.join("\n")
     }
 

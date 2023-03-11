@@ -10,3 +10,4 @@ string-builder = "0.2.0"
 arrayvec = "0.7.2"
 rand = "0.8.5"
 nn = "0.1.6"
+clap = { version = "4.1.8", features = ["derive"] }

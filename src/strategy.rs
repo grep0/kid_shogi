@@ -97,7 +97,7 @@ impl<'a, E: Evaluator> SoftMaxStrategy<'a, E> {
             .collect::<Vec<f64>>();
         let sum = values.iter().fold(0.0, |acc,x| acc+x);
         let weights = values.iter().map(|v| ((v * 1000000.0)/sum) as i32).collect::<Vec<_>>();
-        dbg!(&moves, &weights);
+        eprintln!("# moves {:?} weights {:?}", &moves, &weights);
         let wi = WeightedIndex::new(&weights[..]).unwrap();
         let mut res = HashMap::<String, usize>::new();
         for _ in 0..count {

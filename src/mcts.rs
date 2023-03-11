@@ -21,19 +21,20 @@ impl<Eval: ag::Evaluator> MonteCarloTreeSearchStrategy<Eval> {
         if num_tries <=1 { return (None, self.eval.evaluate_position(pos)) }
         let mut softmax = strategy::SoftMaxStrategy::new(&self.eval, self.softness);
         let choices = softmax.multi_choose_move(pos, num_tries-1);
-        dbg!(depth, pos.to_str(), pos.possible_moves(), &choices);
+        eprintln!(">{} {} moves {:?} choices {:?}", depth, pos.to_str(), pos.possible_moves(), &choices);
         let scores: HashMap<String, f64> = choices.into_iter().map(|(mv, count)| {
             let pos1 = pos.make_move(&mv).unwrap();
+            println!(">{} move {} -> {}", depth, mv, pos1.to_str());
             let (_, mvscore) = self.choose_move_internal(depth+1, pos1.as_ref(), count);
             let sc = if pos.current_player() == pos1.as_ref().current_player() {mvscore} else {-mvscore};
             (mv, sc)
         }).collect();
-        dbg!(depth, &scores);
-        // the move is the best move, and score is softmin of all the scores
+        eprintln!(">{} scores {:?}", depth, &scores);
+        // the move is the best move, and score is softmax of all the scores
         let best =
             scores.iter().max_by(|&u, &v| u.1.partial_cmp(v.1).unwrap()).unwrap().0;
-        let total = scores.iter().fold(0.0, |acc, x| acc + (-x.1).exp());
-        (Some(best.clone()), -(total/scores.len() as f64).ln())
+        let total = scores.iter().fold(0.0, |acc, x| acc + (x.1).exp());
+        (Some(best.clone()), (total/scores.len() as f64).ln())
     }
 }
 
