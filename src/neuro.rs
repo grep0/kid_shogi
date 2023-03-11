@@ -29,7 +29,7 @@ impl ag::Evaluator for &NeuroEvaluator {
 }
 
 fn random_game(factory: &dyn ag::PositionFactory, eval: &NeuroEvaluator, max_moves: usize, decay: f64) {
-    let softmax = strategy::SoftMaxStrategy::new(&eval);
+    let softmax = strategy::SoftMaxStrategy::new(&eval, 1.0);
     let mut strat = strategy::FindWinningMoveStrategy::new(softmax);
     let mut current_pos = factory.initial();
     let mut propagation = Vec::<(Vec<f64>, i32, f64)>::new();

@@ -541,6 +541,29 @@ impl ag::Position for Position {
         field
     }
 
+    fn pretty_print(self: &Self) -> String {
+        let mut lines = Vec::<String>::new();
+        for y in (0..4).rev() {
+            lines.push(
+                (0..3).map(|x| {
+                    let pt = Point(x,y);
+                    let c = match self.cells[Position::p_to_c(&pt)] {
+                        Cell::Empty => '.',
+                        Cell::Piece(pt, Color::Sente) => pt.to_fen_char().to_ascii_uppercase(),
+                        Cell::Piece(pt, Color::Gote) => pt.to_fen_char(),
+                    };
+                    c.to_string()
+                }).collect::<Vec<String>>().join(" ").to_string())
+        }
+        lines[0].push_str(" [ ");
+        lines[0].extend(self.gote_hand.iter().map(|pt| pt.to_fen_char()));
+        lines[0].push_str(" ]");
+        lines[3].push_str(" [ ");
+        lines[3].extend(self.sente_hand.iter().map(|pt| pt.to_fen_char().to_ascii_uppercase()));
+        lines[3].push_str((" ]"));
+        lines.join("\n")
+    }
+
     fn as_any(self: &Self) -> &dyn std::any::Any {
         self
     }

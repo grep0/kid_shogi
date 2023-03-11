@@ -74,14 +74,16 @@ impl Evaluator for OneStepEvaluator {
 }
 
 pub struct SoftMaxStrategy<'a, Eval: Evaluator> {
-    rng: StdRng,
     eval: &'a Eval,
+    softness: f64,  // "softness" coefficient - how much we trust the evaluator
+    rng: StdRng,
 }
 
 impl<'a, E: Evaluator> SoftMaxStrategy<'a, E> {
-    pub fn new(e: &'a E) -> Self {
+    pub fn new(e: &'a E,softness: f64) -> Self {
         SoftMaxStrategy{
             eval: e,
+            softness: softness,
             rng: StdRng::from_entropy(),
         }
     }
@@ -91,11 +93,11 @@ impl<'a, E: Evaluator> SoftMaxStrategy<'a, E> {
         if moves.is_empty() { return HashMap::new() }
         let values = moves.iter().map(
             |mv| -self.eval.evaluate_position(pos.make_move(mv).unwrap().as_ref()))
-            .map(|v| v.exp())
+            .map(|v| (v*self.softness).exp())
             .collect::<Vec<f64>>();
         let sum = values.iter().fold(0.0, |acc,x| acc+x);
         let weights = values.iter().map(|v| ((v * 1000000.0)/sum) as i32).collect::<Vec<_>>();
-        println!("# moves {:?} weights {:?}", moves, weights);
+        dbg!(&moves, &weights);
         let wi = WeightedIndex::new(&weights[..]).unwrap();
         let mut res = HashMap::<String, usize>::new();
         for _ in 0..count {

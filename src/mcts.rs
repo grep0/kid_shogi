@@ -7,27 +7,28 @@ use crate::strategy;
 
 pub struct MonteCarloTreeSearchStrategy<Eval: ag::Evaluator> {
     num_tries: usize,
+    softness: f64,
     eval: Eval,
 }
 
 impl<Eval: ag::Evaluator> MonteCarloTreeSearchStrategy<Eval> {
-    pub fn new(eval: Eval, num_tries: usize) -> Self {
-        return MonteCarloTreeSearchStrategy{eval: eval, num_tries: num_tries }
+    pub fn new(eval: Eval, num_tries: usize, softness: f64) -> Self {
+        return MonteCarloTreeSearchStrategy{eval: eval, num_tries: num_tries, softness: softness}
     }
 
     fn choose_move_internal(&mut self, depth: i32, pos: &dyn ag::Position, num_tries: usize) -> (Option<String>, f64) {
         if pos.is_lost() { return (None, -self.eval.saturation() )}
         if num_tries <=1 { return (None, self.eval.evaluate_position(pos)) }
-        let mut softmax = strategy::SoftMaxStrategy::new(&self.eval);
+        let mut softmax = strategy::SoftMaxStrategy::new(&self.eval, self.softness);
         let choices = softmax.multi_choose_move(pos, num_tries-1);
-        println!("{}> {:?} moves {:?} choices {:?}", depth, pos.to_str(), pos.possible_moves(), choices);
+        dbg!(depth, pos.to_str(), pos.possible_moves(), &choices);
         let scores: HashMap<String, f64> = choices.into_iter().map(|(mv, count)| {
             let pos1 = pos.make_move(&mv).unwrap();
             let (_, mvscore) = self.choose_move_internal(depth+1, pos1.as_ref(), count);
             let sc = if pos.current_player() == pos1.as_ref().current_player() {mvscore} else {-mvscore};
             (mv, sc)
         }).collect();
-        println!("{}> scores {:?}", depth, scores);
+        dbg!(depth, &scores);
         // the move is the best move, and score is softmin of all the scores
         let best =
             scores.iter().max_by(|&u, &v| u.1.partial_cmp(v.1).unwrap()).unwrap().0;
@@ -55,7 +56,8 @@ pub mod tests {
         let fac = agt::OneTwoGameFactory{};
         let pos = fac.from_str("11 0").unwrap();
         let eval = strategy::OneStepEvaluator{};
-        let mut strat = MonteCarloTreeSearchStrategy{ eval: eval, num_tries: 255 };
+        let mut strat = MonteCarloTreeSearchStrategy::new(
+            eval, 255, 1.0);
         let mv = strat.choose_move(pos.as_ref());
         assert_eq!(mv.unwrap(), "2");
     }

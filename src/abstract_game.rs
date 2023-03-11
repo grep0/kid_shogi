@@ -8,8 +8,15 @@ pub trait Position {
     fn to_str(self: &Self) -> String;
     fn is_lost(self: &Self) -> bool;
     fn current_player(self: &Self) -> i32;  // actually 0 or 1
-    fn encode(self: &Self) -> Vec<f64>;
+    fn encode(self: &Self) -> Vec<f64>;  // for neuro
+    fn pretty_print(self: &Self) -> String;
     fn as_any(self: &Self) -> &dyn Any;  // for downcasting
+}
+
+pub trait PositionFactory {
+    fn game_name(&self) -> &str;
+    fn initial(&self) -> Box<dyn Position>;
+    fn from_str(&self, s: &str) -> Option<Box<dyn Position>>;
 }
 
 pub trait Evaluator {
@@ -17,12 +24,6 @@ pub trait Evaluator {
     // Return saturation value for this evaluator; if ±saturation is returned,
     // evaluator believes that the position is won/lost
     fn saturation(&self) -> f64;
-}
-
-pub trait PositionFactory {
-    fn game_name(&self) -> &str;
-    fn initial(&self) -> Box<dyn Position>;
-    fn from_str(&self, s: &str) -> Option<Box<dyn Position>>;
 }
 
 #[cfg(test)]
@@ -51,6 +52,9 @@ pub mod tests {
         }
         fn to_str(self: &Self) -> String {
             format!("{} {}", self.value, self.player)
+        }
+        fn pretty_print(self: &Self) -> String {
+            self.to_str()
         }
         fn is_lost(self: &Self) -> bool {
             self.value==0
