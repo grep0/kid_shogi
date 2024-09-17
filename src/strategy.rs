@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 // Basic strategy engine
 use super::abstract_game::{Position, Evaluator};
 
@@ -87,35 +85,22 @@ impl<'a, E: Evaluator> SoftMaxStrategy<'a, E> {
             rng: StdRng::from_entropy(),
         }
     }
+}
 
-    pub fn multi_choose_move(&mut self, pos: &dyn Position, count: usize) -> HashMap<String, usize> {
+impl<'a, E: Evaluator> StrategyEngine for SoftMaxStrategy<'a, E> {
+    fn choose_move(&mut self, pos: &dyn Position) -> Option<String> {
         let moves = pos.possible_moves();
-        if moves.is_empty() { return HashMap::new() }
+        if moves.is_empty() { return None }
         let values = moves.iter().map(
             |mv| -self.eval.evaluate_position(pos.make_move(mv).unwrap().as_ref()))
             .map(|v| (v*self.softness).exp())
             .collect::<Vec<f64>>();
         let sum = values.iter().fold(0.0, |acc,x| acc+x);
         let weights = values.iter().map(|v| ((v * 1000000.0)/sum) as i32).collect::<Vec<_>>();
-        eprintln!("# moves {:?} weights {:?}", &moves, &weights);
         let wi = WeightedIndex::new(&weights[..]).unwrap();
-        let mut res = HashMap::<String, usize>::new();
-        for _ in 0..count {
-            let k = moves[self.rng.sample(&wi)].clone();
-            if let Some(it) = res.get_mut(&k) {
-                *it += 1
-            } else {
-                res.insert(k, 1);
-            }
-        }
-        res
-    }
-}
-
-impl<'a, E: Evaluator> StrategyEngine for SoftMaxStrategy<'a, E> {
-    fn choose_move(&mut self, pos: &dyn Position) -> Option<String> {
-        let multi = self.multi_choose_move(pos, 1);
-        multi.keys().into_iter().next().map(|k| k.clone())
+        let smpl = self.rng.sample(wi);
+        //eprintln!("moves={:?} weights={:?} chosen={}", moves, weights, moves[smpl]);
+        Some(moves[smpl].clone())
     }
 }
 
@@ -152,7 +137,7 @@ pub mod tests {
         let followup = RandomMoveStrategy {
             rng: rand::rngs::StdRng::seed_from_u64(32)
         };
-        let mut strategy = FindWinningMoveStrategy{ followup: followup };
+        let mut strategy = FindWinningMoveStrategy::new(followup);
 
         // No immediately winning move, uses followup
         let g = fac.from_str("5 0").unwrap();

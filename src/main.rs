@@ -63,7 +63,7 @@ struct Argv {
     #[arg(short='p', long, default_value_t = 0)]
     human_player: i32,
     // Num tries for MCTS
-    #[arg(long, default_value_t = 200)]
+    #[arg(long, default_value_t = 100)]
     num_tries: usize,
 }
 
@@ -71,6 +71,6 @@ fn main() {
     let args = Argv::parse();
     let evaluator = kids_shogi::SimpleEvaluator{};
     let mut strat =
-        mcts::MonteCarloTreeSearchStrategy::new(evaluator, args.num_tries, 0.3);
+        mcts::MonteCarloTreeSearchStrategy::new(evaluator, args.num_tries, 3.0);
     play_cmd_line(args.human_player, &mut strat);
 }

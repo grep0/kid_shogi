@@ -11,6 +11,7 @@ pub trait Position {
     fn encode(self: &Self) -> Vec<f64>;  // for neuro
     fn pretty_print(self: &Self) -> String;
     fn as_any(self: &Self) -> &dyn Any;  // for downcasting
+    fn clone_to_box(self: &Self) -> Box<dyn Position>;
 }
 
 pub trait PositionFactory {
@@ -31,6 +32,10 @@ pub mod tests {
     use super::*;
 
     // Very simple game to test strategies
+    // Start with a heap of K stones, player can take one or two stones
+    // One who takes the last stone wins
+     
+    #[derive(Clone)]
     pub(crate) struct OneTwoGamePosition {
         value: i32,
         player: i32,
@@ -67,6 +72,9 @@ pub mod tests {
         }
         fn as_any(self: &Self) -> &dyn Any {
             self
+        }
+        fn clone_to_box(self: &Self) -> Box<dyn Position> {
+            Box::new(self.clone())
         }
     }
 

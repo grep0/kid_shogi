@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{collections::HashSet};
+use std::collections::HashSet;
 use string_builder::Builder;
 use arrayvec::ArrayVec;
 
@@ -391,7 +391,14 @@ impl Position {
                 _ => None
             }).collect::<Vec<_>>();
         let drops = uniq_drops.into_iter()
-            .flat_map(|&pk| empty_loc.iter().map(move |&p| Move::Drop(pk, p)))
+            .flat_map(|&pk| empty_loc.iter()
+                .map(move |&p| Move::Drop(pk, p)))
+            .filter(|mv|
+                match mv {
+                    Move::Drop(PieceKind::Chicken, Point(_, 3)) => false,
+                    _ => true
+                }
+            )
             .collect::<Vec<_>>();
         [steps, drops].concat()
     }
@@ -567,6 +574,9 @@ impl ag::Position for Position {
     fn as_any(self: &Self) -> &dyn std::any::Any {
         self
     }
+    fn clone_to_box(self: &Self) -> Box<dyn ag::Position> {
+        Box::new(self.clone())
+    }
 }
 
 pub struct PositionFactory{}
@@ -618,7 +628,7 @@ impl ag::Evaluator for SimpleEvaluator {
         let score_sente_hand: i32 = pos.sente_hand.iter().map(|pk| piece_value(pk)).sum();
         let score_gote_hand: i32 = pos.gote_hand.iter().map(|pk| piece_value(pk)).sum();
         let mult = if pos.current_player==Color::Sente {1} else {-1};
-        ((score_by_board + score_sente_hand - score_gote_hand)*mult) as f64*0.5
+        ((score_by_board + score_sente_hand - score_gote_hand)*mult) as f64
     }
 }
 

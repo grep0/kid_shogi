@@ -1,5 +1,5 @@
 use super::*;
-use crate::abstract_game::{Position as AGPosition, Evaluator};
+use crate::abstract_game::{Position as AGPosition, Evaluator, PositionFactory as AGPositionFactory};
 
 #[test]
 fn point_swap_sides() {
@@ -33,6 +33,20 @@ fn take_piece_success() {
     assert_eq!(take_piece(&pieces, PieceKind::Chicken).unwrap(), vec!(PieceKind::Elephant));
     assert_eq!(take_piece(&pieces, PieceKind::Elephant).unwrap(), vec!(PieceKind::Chicken));
     assert_eq!(take_piece(&pieces, PieceKind::Giraffe), None);
+}
+
+#[test]
+fn abstract_factory() {
+    let pf = PositionFactory{};
+    assert_eq!(pf.game_name(), "Kids Shogi");
+    let pos = pf.initial();
+    assert_eq!(pos.to_str(), "gle/1c1/1C1/ELG b -");
+    let moves = pos.possible_moves();
+    assert_eq!(moves.len(), 4);  // one c, one g, two l
+    assert!(!pos.is_lost());
+    assert_eq!(pos.current_player(), 0);
+    let pos1 = pos.make_move(&moves[0]);
+    assert!(pos1.is_some());
 }
 
 #[test]
@@ -126,7 +140,7 @@ fn possible_moves_with_drops_sente() {
         // chicken
         "b2b3",
         // drops
-        "C*a2", "C*c2", "C*c3", "C*a4", "C*c4",
+        "C*a2", "C*c2", "C*c3",  // chicken cannot be dropped on 4th line
     ];
     expected_moves.sort();
     assert_eq!(moves, expected_moves);
