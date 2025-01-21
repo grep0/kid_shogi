@@ -1,12 +1,13 @@
 // Monte Carlo tree search
 
 use std::collections::{HashMap,HashSet};
+use std::marker::PhantomData;
 
 use crate::abstract_game::{self as ag};
-use crate::strategy;
-use crate::strategy::StrategyEngine;
+use crate::strategy::{self, StrategyEngine};
 
 struct Node {
+    #[allow(dead_code)]
     pos: String,
     parents: HashSet<String>,
     evaluation: f64,
@@ -16,16 +17,17 @@ struct Node {
     is_populated: bool,
 }
 
-struct MCTSState {
+struct MCTSState<PosT: ag::AbstractGame> {
     nodes: HashMap<String, Node>,
+    phantom_data: PhantomData<PosT>,
 }
 
 fn clamp(v: f64) -> f64 {
     if v< -1.0 { -1.0 } else if v>1.0 { 1.0 } else { v }
 }
 
-impl MCTSState {
-    fn make_node(&mut self, pos: &dyn ag::Position, parent: Option<&dyn ag::Position>, evaluator: &dyn ag::Evaluator) {
+impl<PosT: ag::AbstractGame> MCTSState<PosT> {
+    fn make_node<EvalT: ag::Evaluator<PosT>>(&mut self, pos: &PosT, parent: Option<&PosT>, evaluator: &EvalT) {
         let pos_str = pos.to_str();
         if let Some(existing_node) = self.nodes.get_mut(&pos_str) {
             if let Some(p) = parent {
@@ -35,7 +37,7 @@ impl MCTSState {
         }
         let n = Node{
             pos: pos_str.clone(),
-            parents: parent.into_iter().map(ag::Position::to_str).collect(),
+            parents: parent.into_iter().map(ag::AbstractGame::to_str).collect(),
             evaluation: clamp(evaluator.evaluate_position(pos) / evaluator.saturation()),
             visits: 0,
             reward: 0.0,
@@ -45,7 +47,7 @@ impl MCTSState {
         self.nodes.insert(pos_str, n);
     }
 
-    fn populate_children(&mut self, pos: &dyn ag::Position, evaluator: &dyn ag::Evaluator) {
+    fn populate_children<EvalT: ag::Evaluator<PosT>>(&mut self, pos: &PosT, evaluator: &EvalT) {
         let pos_str = pos.to_str();
         let parent_node = self.nodes.get(&pos_str).expect("parent node must exist");
         if parent_node.is_populated { return }
@@ -54,7 +56,7 @@ impl MCTSState {
         let children =
             moves.into_iter().map(|mv| {
                 let new_pos = pos.make_move(&mv).unwrap();
-                self.make_node(new_pos.as_ref(), Some(pos), evaluator);
+                self.make_node(&new_pos, Some(pos), evaluator);
                 (mv, new_pos.to_str())
             }).collect();
         let parent_mut = self.nodes.get_mut(&pos_str).unwrap();
@@ -62,7 +64,7 @@ impl MCTSState {
         parent_mut.is_populated = true;
     }
 
-    fn update_node(&mut self, pos: &dyn ag::Position, reward: f64) {
+    fn update_node(&mut self, pos: &PosT, reward: f64) {
         let pos_str = pos.to_str();
         let node = self.nodes.get_mut(&pos_str).expect("node must exist");
         node.visits+=1;
@@ -70,12 +72,29 @@ impl MCTSState {
         //eprintln!("Pos={} visits={} reward={}", pos_str, node.visits, node.reward);
     }
 
-    fn choose_best_by_reward(&self, pos: &dyn ag::Position) -> Option<String> {
+    #[allow(dead_code)]
+    fn print_move_tree(&self, pos: &PosT, depth: i32, indent: i32) {
+        let indents = String::from_utf8(vec![b' '; indent as usize]).unwrap();
+        pos.possible_moves().into_iter().for_each(|mv| {
+            let new_pos = pos.make_move(&mv).unwrap();
+            if let Some(node) = self.nodes.get(&new_pos.to_str()) {
+                eprintln!("{}{} {}({}) #{}", &indents, mv, node.reward, node.evaluation, node.visits);
+                if depth>0 {
+                    self.print_move_tree(&new_pos, depth-1, indent+4);
+                }
+            } else {
+                eprintln!("{}{} not vidited", &indents, mv);
+            }
+        });
+
+    }
+
+    fn choose_best_by_reward(&self, pos: &PosT) -> Option<String> {
         let moves = pos.possible_moves();
         let c = moves.into_iter().map(|mv| {
             let new_pos = pos.make_move(&mv).unwrap();
             let reward = self.nodes.get(&new_pos.to_str()).unwrap().reward;
-            //eprintln!("mv={} reward={}", mv, reward);
+            //eprintln!("mv={} visits={} reward={}", mv, self.nodes.get(&new_pos.to_str()).unwrap().visits, reward);
             (mv, reward)
         }).min_by(|a, b| a.1.total_cmp(&b.1)).clone();
         match c {
@@ -85,11 +104,11 @@ impl MCTSState {
     }
 }
 
-impl ag::Evaluator for MCTSState {
+impl<PosT: ag::AbstractGame> ag::Evaluator<PosT> for MCTSState<PosT> {
     fn saturation(self: &Self) -> f64 {
         return 1.0
     }
-    fn evaluate_position(self: &Self, pos: &dyn ag::Position) -> f64 {
+    fn evaluate_position(self: &Self, pos: &PosT) -> f64 {
         let pos_str = pos.to_str();
         if let Some(node) = self.nodes.get(&pos_str) {
             let parent_visits: usize = node.parents.iter().map(
@@ -106,30 +125,31 @@ impl ag::Evaluator for MCTSState {
     }
 }
 
-pub struct MonteCarloTreeSearchStrategy<Eval: ag::Evaluator> {
+pub struct MonteCarloTreeSearchStrategy<'a, PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT>> {
     num_tries: usize,
     softness: f64,
     max_depth: i32,
-    eval: Eval,
+    eval: &'a EvalT,
+    phantom_data: PhantomData<PosT>,
 }
 
-impl<Eval: ag::Evaluator> MonteCarloTreeSearchStrategy<Eval> {
-    pub fn new(eval: Eval, num_tries: usize, softness: f64) -> Self {
-        return MonteCarloTreeSearchStrategy{eval: eval, num_tries: num_tries, softness: softness, max_depth: 8}
+impl<'a, PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT>> MonteCarloTreeSearchStrategy<'a, PosT, EvalT> {
+    pub fn new(eval: &'a EvalT, num_tries: usize, softness: f64) -> Self {
+        return MonteCarloTreeSearchStrategy{eval: eval, num_tries: num_tries, softness: softness, max_depth: 8, phantom_data: PhantomData}
     }
 
-    fn walk_once(&mut self, start_pos: &dyn ag::Position, state: &mut MCTSState) {
-        let mut pos = start_pos.clone_to_box();
+    fn walk_once(&mut self, start_pos: &PosT, state: &mut MCTSState<PosT>) {
+        let mut pos = start_pos.clone();
         let mut track = Vec::new();
         let mut track_moves = Vec::new();
         while track.len() < self.max_depth.try_into().unwrap() {
             if pos.is_lost() {
                 break
             }
-            state.populate_children(pos.as_ref(), &self.eval);
+            state.populate_children(&pos, self.eval);
             let mut softmax =
                 strategy::SoftMaxStrategy::new(&*state, self.softness);
-            if let Some(choice) = softmax.choose_move(pos.as_ref()) {
+            if let Some(choice) = softmax.choose_move(&pos) {
                 let pos1 = pos.make_move(&choice).unwrap();
                 //eprintln!("move={} pos1={}", choice, pos1.to_str());
                 track.push(pos);
@@ -140,42 +160,42 @@ impl<Eval: ag::Evaluator> MonteCarloTreeSearchStrategy<Eval> {
             }
         }
         let player_final = pos.current_player();
-        let ev_final = self.eval.evaluate_position(pos.as_ref())/self.eval.saturation();
+        let ev_final = self.eval.evaluate_position(&pos)/self.eval.saturation();
         //eprintln!("moves: {:?} player_final: {} ev_final: {}", track_moves, player_final, ev_final);
         track.push(pos);
         track.into_iter().rev().for_each(|p| {
             let ev = if p.current_player() == player_final {ev_final} else {-ev_final};
-            state.update_node(p.as_ref(), ev)
+            state.update_node(&p, ev)
         })
     }
 }
 
-impl<Eval: ag::Evaluator> strategy::StrategyEngine for MonteCarloTreeSearchStrategy<Eval> {
-    fn choose_move(&mut self, pos: &dyn ag::Position) -> Option<String> {
-        let mut state = MCTSState{ nodes: HashMap::new() };
-        state.make_node(pos,None, &self.eval);
+impl<'a, PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT>> strategy::StrategyEngine<PosT> for MonteCarloTreeSearchStrategy<'a, PosT, EvalT> {
+    fn choose_move(&mut self, pos: &PosT) -> Option<String> {
+        let mut state = MCTSState{ nodes: HashMap::new(), phantom_data: PhantomData };
+        state.make_node(pos,None, self.eval);
         for _ in 1..self.num_tries {
             self.walk_once(pos, &mut state)
         }
+        //state.print_move_tree(pos, 2, 0);
         state.choose_best_by_reward(pos)
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{abstract_game::{tests as agt, PositionFactory}, strategy::{self, StrategyEngine}};
+    use crate::{abstract_game::{tests as agt, AbstractGame}, strategy::{self, StrategyEngine}};
 
     use super::MonteCarloTreeSearchStrategy;
 
     // This is a somewhat probabilistic test but it succesfully solves OneTwoGame
     #[test]
     fn smoke() {
-        let fac = agt::OneTwoGameFactory{};
-        let pos = fac.from_str("8 0").unwrap();
-        let eval = strategy::OneStepEvaluator{};
+        let pos = agt::OneTwoGame::from_str("8 0").unwrap();
+        let eval = strategy::OneStepEvaluator::<agt::OneTwoGame>::new();
         let mut strat = MonteCarloTreeSearchStrategy::new(
-            eval, 32, 3.0);
-        let mv = strat.choose_move(pos.as_ref());
+            &eval, 32, 3.0);
+        let mv = strat.choose_move(&pos);
         assert_eq!(mv.unwrap(), "2");
     }
 }

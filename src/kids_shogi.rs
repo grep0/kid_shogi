@@ -52,6 +52,9 @@ fn diff(a: usize, b: usize) -> isize {
 
 impl PieceKind {
     const COUNT: usize = 5;
+    // Pieces that can be in hand
+    const IN_HAND: &[PieceKind] = &[PieceKind::Chicken, PieceKind::Elephant, PieceKind::Giraffe];
+    const IN_HAND_COUNT: usize = 3;
 
     pub fn promote(self: &Self) -> PieceKind {
         match self {
@@ -166,6 +169,8 @@ pub struct Position {
 }
 
 impl Position {
+    const CELL_COUNT: usize = 12;
+
     fn find_all_pieces(self: &Self, color: Color) -> Vec<(Point, PieceKind)> {
         self.cells.iter().enumerate().filter_map(|(xy, cell)|
             match cell {
@@ -238,28 +243,6 @@ impl Position {
             sente_hand: Vec::new(),
             gote_hand: Vec::new(),
             current_player: Color::Sente
-        }
-    }
-    
-    pub fn initial() -> Position {
-        let cells = Cells::from([
-            Cell::Piece(PieceKind::Elephant, Color::Sente),
-            Cell::Piece(PieceKind::Lion, Color::Sente),
-            Cell::Piece(PieceKind::Giraffe, Color::Sente),
-            Cell::Empty,
-            Cell::Piece(PieceKind::Chicken, Color::Sente),
-            Cell::Empty,
-            Cell::Empty,
-            Cell::Piece(PieceKind::Chicken, Color::Gote),
-            Cell::Empty,
-            Cell::Piece(PieceKind::Giraffe, Color::Gote),
-            Cell::Piece(PieceKind::Lion, Color::Gote),
-            Cell::Piece(PieceKind::Elephant, Color::Gote)]);
-        return Position{
-            cells: cells,
-            sente_hand: Vec::new(),
-            gote_hand: Vec::new(),
-            current_player: Color::Sente,
         }
     }
 
@@ -338,7 +321,7 @@ impl Position {
         return None
     }
 
-    pub fn make_move(self: &Self, mv: &Move) -> Option<Position> {
+    pub fn make_move_impl(self: &Self, mv: &Move) -> Option<Position> {
         match self.current_player {
             Color::Sente => { self.make_move_sente(mv) },
             Color::Gote => { self.swap_sides()
@@ -492,15 +475,14 @@ impl Position {
     }
 }
 
-impl ag::Position for Position {
+impl ag::AbstractGame for Position {
     fn possible_moves(self: &Self) -> Vec<String> {
         self.list_possible_moves().into_iter().map(|mv| mv.to_fen()).collect()
     }
-    fn make_move(self: &Self, mvstr: &str) -> Option<Box<dyn ag::Position>> {
+    fn make_move(self: &Self, mvstr: &str) -> Option<Self> {
         if let Some(mv) = Move::from_fen(mvstr) {
-            self.make_move(&mv).and_then(|pos| {
-                let bx: Box<dyn ag::Position> = Box::new(pos);
-                Some(bx)
+            self.make_move_impl(&mv).and_then(|pos| {
+                Some(pos)
             })
         } else {
             None
@@ -517,35 +499,6 @@ impl ag::Position for Position {
             Color::Sente => 0,
             Color::Gote => 1,
         }
-    }
-    fn encode(self: &Self) -> Vec<f64> {
-        fn delta(size: usize, pos: usize) -> Vec<f64> {
-            let mut d = vec![0.0; size];
-            d[pos] = 1.0;
-            d
-        }
-        fn encode_hand(h: &[PieceKind]) -> Vec<f64> {
-            let mut v = vec![0.0; 6];
-            let mut curh = Vec::from(h);
-            for pk in [PieceKind::Chicken, PieceKind::Elephant, PieceKind::Giraffe] {
-                for i in 0..2 {  // max 2 pieces of any kind in hand
-                    if let Some(nexth) = take_piece(&curh, pk) {
-                        curh = nexth;
-                        v[pk.index()*2 + i] = 1.0
-                    }
-                }
-            }
-            v
-        }
-        let mut field: Vec<f64> = self.cells.iter().map(
-            |cell| match cell {
-                Cell::Empty => vec![0.0; PieceKind::COUNT*2],
-                Cell::Piece(pk, c) =>
-                        delta(PieceKind::COUNT*2, pk.index() + c.index()*PieceKind::COUNT),
-            }.into_iter()).flatten().collect();
-        field.append(&mut encode_hand(&self.sente_hand));
-        field.append(&mut encode_hand(&self.gote_hand));
-        field
     }
 
     fn pretty_print(self: &Self) -> String {
@@ -570,29 +523,67 @@ impl ag::Position for Position {
         lines[3].push_str(" ]");
         lines.join("\n")
     }
-
-    fn as_any(self: &Self) -> &dyn std::any::Any {
-        self
+    
+    fn initial() -> Self {
+        let cells = Cells::from([
+            Cell::Piece(PieceKind::Elephant, Color::Sente),
+            Cell::Piece(PieceKind::Lion, Color::Sente),
+            Cell::Piece(PieceKind::Giraffe, Color::Sente),
+            Cell::Empty,
+            Cell::Piece(PieceKind::Chicken, Color::Sente),
+            Cell::Empty,
+            Cell::Empty,
+            Cell::Piece(PieceKind::Chicken, Color::Gote),
+            Cell::Empty,
+            Cell::Piece(PieceKind::Giraffe, Color::Gote),
+            Cell::Piece(PieceKind::Lion, Color::Gote),
+            Cell::Piece(PieceKind::Elephant, Color::Gote)]);
+        return Position{
+            cells: cells,
+            sente_hand: Vec::new(),
+            gote_hand: Vec::new(),
+            current_player: Color::Sente,
+        }
     }
-    fn clone_to_box(self: &Self) -> Box<dyn ag::Position> {
-        Box::new(self.clone())
+
+    fn from_str(s: &str) -> Option<Self> {
+        Position::from_fen(s)
     }
 }
 
-pub struct PositionFactory{}
-
-impl ag::PositionFactory for PositionFactory {
-    fn game_name(&self) -> &str {
-        "Kids Shogi"
+impl ag::NeuroPosition for Position {
+    fn encode(self: &Self) -> Vec<f64> {
+        fn delta(size: usize, pos: usize) -> Vec<f64> {
+            let mut d = vec![0.0; size];
+            d[pos] = 1.0;
+            d
+        }
+        fn encode_hand(h: &[PieceKind]) -> Vec<f64> {
+            let mut v = vec![0.0; PieceKind::IN_HAND_COUNT*2];
+            let mut curh = Vec::from(h);
+            for &pk in PieceKind::IN_HAND {
+                for i in 0..2 {  // max 2 pieces of any kind in hand
+                    if let Some(nexth) = take_piece(&curh, pk) {
+                        curh = nexth;
+                        v[pk.index()*2 + i] = 1.0
+                    }
+                }
+            }
+            v
+        }
+        let mut field: Vec<f64> = self.cells.iter().map(
+            |cell| match cell {
+                Cell::Empty => vec![0.0; PieceKind::COUNT*2],
+                Cell::Piece(pk, c) =>
+                        delta(PieceKind::COUNT*2, pk.index() + c.index()*PieceKind::COUNT),
+            }.into_iter()).flatten().collect();
+        field.append(&mut encode_hand(&self.sente_hand));
+        field.append(&mut encode_hand(&self.gote_hand));
+        field.append(&mut delta(2, self.current_player as usize));
+        field
     }
-    fn initial(&self) -> Box<dyn ag::Position> {
-        Box::from(Position::initial())
-    }
-    fn from_str(&self, s: &str) -> Option<Box<dyn ag::Position>> {
-        Position::from_fen(s).and_then(|pos| {
-            let bx: Box<dyn ag::Position> = Box::new(pos);
-            Some(bx)
-        })
+    fn encode_length() -> usize {
+        Position::CELL_COUNT*PieceKind::COUNT*2 + PieceKind::IN_HAND_COUNT*2*2 + 2
     }
 }
 
@@ -600,14 +591,15 @@ impl ag::PositionFactory for PositionFactory {
 // c=1, g=e=3, h=5
 pub struct SimpleEvaluator {}
 
-impl ag::Evaluator for SimpleEvaluator {
+impl ag::Evaluator<Position> for SimpleEvaluator {
     fn saturation(&self) -> f64 {
-        100.0
+        // Max possible piece advantage = (2*5+2*3+2*3)/2 = 11
+        20.0
     }
-    fn evaluate_position(&self, abstract_pos: &dyn ag::Position) -> f64 {
-        let pos = abstract_pos.as_any().downcast_ref::<Position>()
-            .expect("must be KidsShogi position");
-        if pos.is_lost() { return -self.saturation() }
+    fn evaluate_position(&self, pos: &Position) -> f64 {
+        if pos.is_lost() {
+            return -self.saturation()
+        }
         fn piece_value(pk: &PieceKind) -> i32 {
             match pk {
                 PieceKind::Chicken => 1,
@@ -628,7 +620,7 @@ impl ag::Evaluator for SimpleEvaluator {
         let score_sente_hand: i32 = pos.sente_hand.iter().map(|pk| piece_value(pk)).sum();
         let score_gote_hand: i32 = pos.gote_hand.iter().map(|pk| piece_value(pk)).sum();
         let mult = if pos.current_player==Color::Sente {1} else {-1};
-        ((score_by_board + score_sente_hand - score_gote_hand)*mult) as f64
+        ((score_by_board + score_sente_hand - score_gote_hand)*mult) as f64 / 2.0
     }
 }
 

@@ -1,5 +1,7 @@
+use ag::NeuroPosition;
+
 use super::*;
-use crate::abstract_game::{Position as AGPosition, Evaluator, PositionFactory as AGPositionFactory};
+use crate::abstract_game::{AbstractGame as AGPosition, Evaluator};
 
 #[test]
 fn point_swap_sides() {
@@ -36,10 +38,8 @@ fn take_piece_success() {
 }
 
 #[test]
-fn abstract_factory() {
-    let pf = PositionFactory{};
-    assert_eq!(pf.game_name(), "Kids Shogi");
-    let pos = pf.initial();
+fn initial_position() {
+    let pos = Position::initial();
     assert_eq!(pos.to_str(), "gle/1c1/1C1/ELG b -");
     let moves = pos.possible_moves();
     assert_eq!(moves.len(), 4);  // one c, one g, two l
@@ -50,24 +50,16 @@ fn abstract_factory() {
 }
 
 #[test]
-fn initial_position() {
-    let pos = Position::initial();
-    assert_eq!(pos.to_fen(), "gle/1c1/1C1/ELG b -");
-    let moves = pos.list_possible_moves();
-    assert_eq!(moves.len(), 4);  // one c, one g, two l
-}
-
-#[test]
 fn a_few_moves() {
     let pos = Position::initial();
     let mv1 = Move::Step(Point(1,1), Point(1,2));
-    let pos1 = pos.make_move(&mv1).unwrap();
+    let pos1 = pos.make_move_impl(&mv1).unwrap();
     assert_eq!(pos1.to_fen(), "gle/1C1/3/ELG w C");
     let mv2 = Move::Step(Point(2,3), Point(1,2));
-    let pos2 = pos1.make_move(&mv2).unwrap();
+    let pos2 = pos1.make_move_impl(&mv2).unwrap();
     assert_eq!(pos2.to_fen(), "gl1/1e1/3/ELG b Cc");
     let mv3 = Move::Drop(PieceKind::Chicken, Point(1,1));
-    let pos3 = pos2.make_move(&mv3).unwrap();
+    let pos3 = pos2.make_move_impl(&mv3).unwrap();
     assert_eq!(pos3.to_fen(), "gl1/1e1/1C1/ELG w c");
 }
 
@@ -82,7 +74,7 @@ fn pos_from_fen() {
 fn chicken_promotion() {
     let pos = Position::from_fen("l2/2C/3/L2 b -").unwrap();
     let mv = Move::Step(Point(2,2), Point(2,3));
-    let pos2 = pos.make_move(&mv).unwrap();
+    let pos2 = pos.make_move_impl(&mv).unwrap();
     assert_eq!(pos2.to_fen(), "l1H/3/3/L2 w -")
 }
 
@@ -90,7 +82,7 @@ fn chicken_promotion() {
 fn demote_on_capture() {
     let pos = Position::from_fen("l2/2h/2C/L2 b -").unwrap();
     let mv = Move::from_fen("c2c3").unwrap();
-    let pos2 = pos.make_move(&mv).unwrap();
+    let pos2 = pos.make_move_impl(&mv).unwrap();
     assert_eq!(pos2.to_fen(), "l2/2C/3/L2 w C")
 }
 
@@ -98,7 +90,7 @@ fn demote_on_capture() {
 fn win_sente_on_lion_capture() {
     let pos = Position::from_fen("l2/G2/3/L2 b -").unwrap();
     let mv = Move::from_fen("a3a4").unwrap();
-    let pos2 = pos.make_move(&mv).unwrap();
+    let pos2 = pos.make_move_impl(&mv).unwrap();
     assert!(pos2.is_lost());
 }
 
@@ -106,7 +98,7 @@ fn win_sente_on_lion_capture() {
 fn win_on_lion_passed() {
     let pos = Position::from_fen("l2/G1L/3/3 b -").unwrap();
     let mv = Move::from_fen("c3c4").unwrap();
-    let pos2 = pos.make_move(&mv).unwrap();
+    let pos2 = pos.make_move_impl(&mv).unwrap();
     assert!(pos2.is_lost());
 }
 
@@ -114,7 +106,7 @@ fn win_on_lion_passed() {
 fn no_win_on_lion_passed_under_attack() {
     let pos = Position::from_fen("lg1/G1L/3/3 b -").unwrap();
     let mv = Move::from_fen("c3c4").unwrap();
-    let pos2 = pos.make_move(&mv).unwrap();
+    let pos2 = pos.make_move_impl(&mv).unwrap();
     assert!(!pos2.is_lost());
 }
 
@@ -122,7 +114,7 @@ fn no_win_on_lion_passed_under_attack() {
 fn win_gote_on_lion_capture() {
     let pos = Position::from_fen("l2/G2/1e1/L2 w -").unwrap();
     let mv = Move::from_fen("b2a1").unwrap();
-    let pos2 = pos.make_move(&mv).unwrap();
+    let pos2 = pos.make_move_impl(&mv).unwrap();
     assert!(pos2.is_lost());
 }
 
@@ -229,34 +221,41 @@ fn hen_moves() {
 fn invalid_moves() {
     let pos = Position::from_fen("1l1/ge1/1C1/ELG b C").unwrap();
     // from empty
-    assert!(pos.make_move(&Move::Step(Point(2,1), Point(2,2))).is_none());
+    assert!(pos.make_move_impl(&Move::Step(Point(2,1), Point(2,2))).is_none());
     // from enemy location
-    assert!(pos.make_move(&Move::Step(Point(1,3), Point(0,3))).is_none());
+    assert!(pos.make_move_impl(&Move::Step(Point(1,3), Point(0,3))).is_none());
     // wrong direction for this piece
-    assert!(pos.make_move(&Move::Step(Point(1,1), Point(0,1))).is_none());
+    assert!(pos.make_move_impl(&Move::Step(Point(1,1), Point(0,1))).is_none());
     // on top of your own piece
-    assert!(pos.make_move(&Move::Step(Point(1,0), Point(1,1))).is_none());
+    assert!(pos.make_move_impl(&Move::Step(Point(1,0), Point(1,1))).is_none());
     // drop of absent piece
-    assert!(pos.make_move(&Move::Drop(PieceKind::Giraffe, Point(0,1))).is_none());
+    assert!(pos.make_move_impl(&Move::Drop(PieceKind::Giraffe, Point(0,1))).is_none());
     // drop on your own piece
-    assert!(pos.make_move(&Move::Drop(PieceKind::Chicken, Point(0,0))).is_none());
+    assert!(pos.make_move_impl(&Move::Drop(PieceKind::Chicken, Point(0,0))).is_none());
     // drop on opponent's head
-    assert!(pos.make_move(&Move::Drop(PieceKind::Chicken, Point(1,3))).is_none());
+    assert!(pos.make_move_impl(&Move::Drop(PieceKind::Chicken, Point(1,3))).is_none());
 }
 
 #[test]
 fn encode_hand() {
     let fen = "gl1/1e1/3/ELG b Cc";
     let pos = Position::from_fen(fen).unwrap();
+    let encode_len = Position::encode_length();
+    assert_eq!(encode_len, 12*10 + 6*2 + 2);
     
     let encoded = pos.encode();
     println!("{:?}", encoded);
-    assert_eq!(encoded.len(), 12*10 + 6*2);
-    assert_eq!(encoded.iter().fold(0.0, |acc,x| acc+x), 8.0);  // each piece makes one 1.0
+    assert_eq!(encoded.len(), encode_len);
+    assert_eq!(encoded.iter().take(12*10+6*2).fold(0.0, |acc,x| acc+x), 8.0);  // each piece makes one 1.0
     assert_eq!(encoded[1], 1.0);  // sente elephant at (0,0)
+    assert_eq!(encoded[1*10+4], 1.0);  // sente lion at (0,1)
+    assert_eq!(encoded[2*10+2], 1.0);  // sente giraffe at (0,2)
+    assert_eq!(encoded[7*10+1+5], 1.0);  // gote elephant at (2,1)
     assert_eq!(encoded[9*10+2+5], 1.0);  // gote giraffe at (3,0)
+    assert_eq!(encoded[10*10+4+5], 1.0);  // gote lion at (3,1)
     assert_eq!(encoded[12*10], 1.0);  // sente chicken in hand
     assert_eq!(encoded[12*10+6], 1.0);  // gote chicken in hand
+    assert_eq!(encoded[12*10+6*2], 1.0); // sente's move
 }
 
 #[test]
@@ -267,4 +266,9 @@ fn simple_evaluator() {
 
     let pos2 = Position::from_fen("gle/1C1/3/ELG w C").unwrap();
     assert_eq!(eval.evaluate_position(&pos2), -1.0);  // opponent captured a chicken
+
+    let pos3 = Position::from_fen("l2/G2/3/L2 b -").unwrap();
+    let mv = Move::from_fen("a3a4").unwrap();
+    let pos4 = pos3.make_move_impl(&mv).unwrap();
+    assert_eq!(eval.evaluate_position(&pos4), -eval.saturation());  // winning pos
 }
