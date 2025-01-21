@@ -8,6 +8,7 @@ mod abstract_game;
 mod strategy;
 mod neuro;
 mod mcts;
+mod rpc;
 
 type GamePosition = kids_shogi::Position;
 
