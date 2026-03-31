@@ -68,6 +68,9 @@ struct Argv {
     // Num tries for MCTS
     #[arg(long, default_value_t = 1000)]
     num_tries: usize,
+    // Exploration softness for MCTS
+    #[arg(long, default_value_t = 3.0)]
+    softness: f64,
     #[arg(long)]
     model_file: Option<String>,
     #[arg(short='t', long)]
@@ -88,7 +91,7 @@ struct Argv {
 
 fn play_with_evaluator<EvalT: Evaluator<GamePosition>>(eval: &EvalT, args: &Argv) {
     let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
-        eval, args.num_tries, 3.0);
+        eval, args.num_tries, args.softness);
     play_cmd_line(args.human_player, &mut strat);
 }
 
@@ -106,7 +109,8 @@ fn main() {
         println!("Web UI at http://{}", args.web_listen);
 
         let rpc_addr = args.listen.parse().expect("invalid listen address");
-        let io = rpc::create_io_handler(args.num_tries);
+        static EVAL: kids_shogi::SimpleEvaluator = kids_shogi::SimpleEvaluator {};
+        let io = rpc::create_io_handler(mcts::MctsFactory::new(&EVAL, args.num_tries, args.softness));
         let server = ServerBuilder::new(io)
             .cors(DomainsValidation::AllowOnly(vec![AccessControlAllowOrigin::Any]))
             .start_http(&rpc_addr)

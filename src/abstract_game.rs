@@ -17,6 +17,10 @@ pub trait NeuroPosition : AbstractGame {
     fn encode_length() -> usize;
 }
 
+pub trait StrategyFactory<PosT: AbstractGame + Send + 'static>: Send + Sync {
+    fn create(&self) -> Box<dyn crate::strategy::StrategyEngine<PosT>>;
+}
+
 pub trait Evaluator<PosT: AbstractGame> {
     fn evaluate_position(&self, pos: &PosT) -> f64;
     // Return saturation value for this evaluator; if ±saturation is returned,

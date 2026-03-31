@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use rand::Rng;
 use jsonrpc_core::{IoHandler, Params, Value, Error};
 
-use crate::{abstract_game::AbstractGame, kids_shogi as ks, mcts, strategy::StrategyEngine};
+use crate::abstract_game::{AbstractGame, StrategyFactory};
 
 // ── Request / response types ──────────────────────────────────────────────────
 
@@ -75,15 +75,9 @@ impl GameRegistry {
     }
 }
 
-// ── Strategy factory ──────────────────────────────────────────────────────────
-
-trait StrategyFactory<PosT: AbstractGame>: Send + Sync {
-    fn create(&self) -> Box<dyn StrategyEngine<PosT>>;
-}
-
 // ── Game server ───────────────────────────────────────────────────────────────
 
-struct GameServer<PosT: AbstractGame, FactoryT: StrategyFactory<PosT>> {
+struct GameServer<PosT: AbstractGame + Send + 'static, FactoryT: StrategyFactory<PosT>> {
     registry: Mutex<GameRegistry>,
     strategy_factory: FactoryT,
     phantom_pos: std::marker::PhantomData<PosT>,
@@ -91,10 +85,10 @@ struct GameServer<PosT: AbstractGame, FactoryT: StrategyFactory<PosT>> {
 
 // SAFETY: registry is protected by Mutex; factory is Send+Sync; PhantomData
 // holds no PosT data.
-unsafe impl<PosT: AbstractGame, FactoryT: StrategyFactory<PosT>> Send for GameServer<PosT, FactoryT> {}
-unsafe impl<PosT: AbstractGame, FactoryT: StrategyFactory<PosT>> Sync for GameServer<PosT, FactoryT> {}
+unsafe impl<PosT: AbstractGame + Send + 'static, FactoryT: StrategyFactory<PosT>> Send for GameServer<PosT, FactoryT> {}
+unsafe impl<PosT: AbstractGame + Send + 'static, FactoryT: StrategyFactory<PosT>> Sync for GameServer<PosT, FactoryT> {}
 
-impl<PosT: AbstractGame, FactoryT: StrategyFactory<PosT>> GameServer<PosT, FactoryT> {
+impl<PosT: AbstractGame + Send + 'static, FactoryT: StrategyFactory<PosT>> GameServer<PosT, FactoryT> {
     fn new(strategy_factory: FactoryT) -> Self {
         GameServer {
             registry: Mutex::new(GameRegistry::new()),
@@ -174,21 +168,12 @@ impl<PosT: AbstractGame, FactoryT: StrategyFactory<PosT>> GameServer<PosT, Facto
     }
 }
 
-// ── KidsShogiGame concrete factory ───────────────────────────────────────────
-
-struct KidsShogiFactory {
-    num_tries: usize,
-}
-
-impl StrategyFactory<ks::KidsShogiGame> for KidsShogiFactory {
-    fn create(&self) -> Box<dyn StrategyEngine<ks::KidsShogiGame>> {
-        static EVAL: ks::SimpleEvaluator = ks::SimpleEvaluator {};
-        Box::new(mcts::MonteCarloTreeSearchStrategy::new(&EVAL, self.num_tries, 3.0))
-    }
-}
-
-pub fn create_io_handler(num_tries: usize) -> IoHandler {
-    let server = Arc::new(GameServer::new(KidsShogiFactory { num_tries }));
+pub fn create_io_handler<PosT, FactoryT>(factory: FactoryT) -> IoHandler
+where
+    PosT: AbstractGame + Send + 'static,
+    FactoryT: StrategyFactory<PosT> + 'static,
+{
+    let server = Arc::new(GameServer::new(factory));
     let mut io = IoHandler::default();
     let s1 = Arc::clone(&server);
     io.add_sync_method("start_game", move |params| s1.start_game(params));
@@ -202,10 +187,16 @@ pub mod tests {
 
 use super::*;
 use serde_json::Value;
+use crate::{kids_shogi, mcts::MctsFactory};
+
+fn test_io() -> IoHandler {
+    static EVAL: kids_shogi::SimpleEvaluator = kids_shogi::SimpleEvaluator {};
+    create_io_handler(MctsFactory::new(&EVAL, 1000, 3.0))
+}
 
 #[test]
 fn start_game() {
-    let io = create_io_handler(1000);
+    let io = test_io();
     let request0 = r#"{"jsonrpc": "2.0", "method":"start_game", "params":{"player":0}, "id":1}"#;
     let response0 = io.handle_request_sync(request0).unwrap();
     println!("response0={}", response0);
@@ -229,7 +220,7 @@ fn start_game() {
 
 #[test]
 fn make_move() {
-    let io = create_io_handler(1000);
+    let io = test_io();
 
     // Start as player 0 (Sente, moves first)
     let start_req = r#"{"jsonrpc": "2.0", "method":"start_game", "params":{"player":0}, "id":1}"#;
@@ -262,7 +253,7 @@ fn make_move() {
 
 #[test]
 fn invalid_move_rejected() {
-    let io = create_io_handler(1000);
+    let io = test_io();
     let start_req = r#"{"jsonrpc": "2.0", "method":"start_game", "params":{"player":0}, "id":1}"#;
     let start_resp: StartGameResponse = serde_json::from_value(
         serde_json::from_str::<Value>(&io.handle_request_sync(start_req).unwrap())
@@ -277,7 +268,7 @@ fn invalid_move_rejected() {
 
 #[test]
 fn unknown_game_id_rejected() {
-    let io = create_io_handler(100);
+    let io = test_io();
     let request = r#"{"jsonrpc": "2.0", "method":"make_move", "params":{"game_id":"deadbeefdeadbeef", "move":"b2b3"}, "id":1}"#;
     let response = io.handle_request_sync(request).unwrap();
     let value = serde_json::from_str::<Value>(&response).unwrap();

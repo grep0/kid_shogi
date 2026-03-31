@@ -125,6 +125,35 @@ impl<PosT: ag::AbstractGame> ag::Evaluator<PosT> for MCTSState<PosT> {
     }
 }
 
+/// Creates a fresh `MonteCarloTreeSearchStrategy` for each game.
+/// `EvalT` must be `'static + Sync` so it can be held behind a `&'static` reference
+/// and shared across threads without a lifetime parameter on the factory.
+pub struct MctsFactory<PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT> + Sync + 'static> {
+    pub eval: &'static EvalT,
+    pub num_tries: usize,
+    pub softness: f64,
+    _pos: PhantomData<PosT>,
+}
+
+impl<PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT> + Sync + 'static> MctsFactory<PosT, EvalT> {
+    pub fn new(eval: &'static EvalT, num_tries: usize, softness: f64) -> Self {
+        MctsFactory { eval, num_tries, softness, _pos: PhantomData }
+    }
+}
+
+unsafe impl<PosT: ag::AbstractGame + Sync, EvalT: ag::Evaluator<PosT> + Sync + 'static> Sync
+    for MctsFactory<PosT, EvalT> {}
+
+impl<PosT, EvalT> ag::StrategyFactory<PosT> for MctsFactory<PosT, EvalT>
+where
+    PosT: ag::AbstractGame + Send + Sync + 'static,
+    EvalT: ag::Evaluator<PosT> + Sync + Send + 'static,
+{
+    fn create(&self) -> Box<dyn strategy::StrategyEngine<PosT>> {
+        Box::new(MonteCarloTreeSearchStrategy::new(self.eval, self.num_tries, self.softness))
+    }
+}
+
 pub struct MonteCarloTreeSearchStrategy<'a, PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT>> {
     num_tries: usize,
     softness: f64,
