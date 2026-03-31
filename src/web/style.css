@@ -19,16 +19,30 @@ h1 {
   color: #3a2a1a;
 }
 
-/* ── Setup screen ─────────────────────────────────────────── */
+/* ── Setup overlay ────────────────────────────────────────── */
+
+#setup-screen {
+  order: 2; /* sits in the flex column between the hands, over the board */
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(245, 233, 208, 0.55);
+  gap: 0.6rem;
+  z-index: 10;
+}
+
+#setup-screen.hidden { display: none; }
 
 #setup-screen p {
   font-size: 1.1rem;
-  margin-bottom: 0.8rem;
+  margin: 0;
 }
 
 #setup-screen button {
-  margin: 0.25rem;
-  padding: 0.6rem 1.4rem;
+  padding: 0.6rem 1.8rem;
   font-size: 1rem;
   cursor: pointer;
   border: 2px solid #6b4c2a;
@@ -45,7 +59,14 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
+  position: relative;
 }
+
+#status-bar    { order: 0; }
+#hand-gote     { order: 1; }
+#board         { order: 2; }
+#hand-sente    { order: 3; }
+#btn-new-game  { order: 4; }
 
 #status-bar {
   font-size: 1rem;
@@ -56,28 +77,38 @@ h1 {
 
 /* ── Board ────────────────────────────────────────────────── */
 
+/* SVG grid is exactly 52×60 per cell (156×240 total); scale ×1.5 → 78×90 per cell */
 #board {
   display: grid;
-  grid-template-columns: repeat(3, 80px);
-  grid-template-rows: repeat(4, 80px);
-  gap: 4px;
-  background: #8b6340;
-  padding: 4px;
-  border: 3px solid #5a3a1a;
-  border-radius: 4px;
-  display: inline-grid;
+  grid-template-columns: repeat(3, 78px);
+  grid-template-rows: repeat(4, 90px);
+  position: relative;
+  overflow: hidden;
+  width: 234px;
+  height: 360px;
+}
+
+#board-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  transition: transform 0.3s ease;
+}
+
+#board-bg.flipped {
+  transform: rotate(180deg);
 }
 
 .cell {
-  background: #d4a96a;
-  width: 80px;
-  height: 80px;
+  width: 78px;
+  height: 90px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: default;
   position: relative;
-  border-radius: 2px;
 }
 
 .cell.selectable { cursor: pointer; }
@@ -109,8 +140,8 @@ h1 {
 /* ── Pieces ───────────────────────────────────────────────── */
 
 .piece {
-  width: 64px;
-  height: 64px;
+  width: 70px;
+  height: 70px;
   user-select: none;
   pointer-events: none;
 }

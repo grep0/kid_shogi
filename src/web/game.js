@@ -48,8 +48,6 @@ const PIECE_NAMES = { C: 'Chicken', E: 'Elephant', G: 'Giraffe', L: 'Lion', H: '
 function parsePosition(posStr) {
   const [boardPart, turnChar, handPart] = posStr.split(' ');
   const turn = turnChar === 'b' ? 'sente' : 'gote';
-  const currentOwner = turn; // uppercase = current player
-  const opponentOwner = turn === 'sente' ? 'gote' : 'sente';
 
   const grid = boardPart.split('/').map(rowStr => {
     const cells = [];
@@ -114,9 +112,13 @@ function setStatus(msg) {
   $('status-bar').textContent = msg;
 }
 
-// Human's pieces always face up (SenteX.svg); AI's pieces always face down (GoteX.svg).
+// Sente pieces use SenteX.svg (facing up); Gote pieces use GoteX.svg (facing down).
+// When the board is flipped (human is Gote), swap: Gote's pieces are now at the
+// bottom and should appear facing up, so they get the Sente image, and vice versa.
 function pieceImageSrc(kind, owner) {
-  return `${ASSETS_BASE}${owner === state.humanPlayer ? 'Sente' : 'Gote'}${kind}.svg`;
+  const flipped = state.humanPlayer === 'gote';
+  const facingUp = flipped ? (owner === 'gote') : (owner === 'sente');
+  return `${ASSETS_BASE}${facingUp ? 'Sente' : 'Gote'}${kind}.svg`;
 }
 
 // ─── Board rendering ──────────────────────────────────────────────────────────
@@ -124,7 +126,6 @@ function pieceImageSrc(kind, owner) {
 function renderBoard() {
   const { parsed, possibleMoves, selected, humanPlayer, gameResult } = state;
   const boardEl = $('board');
-  boardEl.innerHTML = '';
 
   // Determine reachable destination squares from the current selection
   const reachable = new Set();
@@ -146,10 +147,13 @@ function renderBoard() {
   // Which squares have selectable pieces (human's pieces, human's turn)
   const isHumanTurn = parsed.turn === humanPlayer && !gameResult;
 
-  // The position string is always from the current player's perspective
-  // (uppercase = current player, at bottom rows). Flip only when it's the
-  // AI's turn so the human's pieces stay at the bottom of the screen.
-  const flipped = parsed.turn !== humanPlayer;
+  // FEN is always Sente-absolute. For Gote, flip board so Gote's pieces
+  // (rows 1-2 in FEN = grid indices 2-3) appear at the bottom of the screen.
+  const flipped = humanPlayer === 'gote';
+
+  $('board-bg').classList.toggle('flipped', flipped);
+  // Clear only the cell elements, leaving #board-bg in place
+  boardEl.querySelectorAll('.cell').forEach(el => el.remove());
 
   const rowIdxSeq = flipped ? [3, 2, 1, 0] : [0, 1, 2, 3];
   const colSeq    = flipped ? [2, 1, 0]    : [0, 1, 2];
@@ -187,10 +191,9 @@ function renderBoard() {
     }
   }
 
-  // Opponent's hand at top (order 0), human's hand at bottom (order 2).
-  const opponent = humanPlayer === 'sente' ? 'gote' : 'sente';
-  $(`hand-${opponent}`).style.order = '0';
-  $(`hand-${humanPlayer}`).style.order = '2';
+  // When human is Gote, swap hand order: Sente's hand on top, Gote's on bottom.
+  $('hand-gote').style.order  = humanPlayer === 'gote' ? '3' : '1';
+  $('hand-sente').style.order = humanPlayer === 'gote' ? '1' : '3';
 
   renderHand('sente', parsed.senteHand);
   renderHand('gote',  parsed.goteHand);
@@ -207,6 +210,7 @@ function renderHand(owner, kinds) {
     img.src = pieceImageSrc(kind, owner);
     img.alt = PIECE_NAMES[kind];
     img.className = 'piece hand-piece';
+    img.dataset.kind = kind;
     if (isHumanTurn && isOwner) img.classList.add('selectable');
 
     const isSelected = state.selected?.type === 'hand' &&
@@ -220,6 +224,116 @@ function renderHand(owner, kinds) {
     });
     handEl.appendChild(img);
   }
+}
+
+// ─── Animation ────────────────────────────────────────────────────────────────
+
+function cellEl(col, rowNum) {
+  return document.querySelector(`#board .cell[data-col="${col}"][data-row="${rowNum}"]`);
+}
+
+// Fly a piece image from fromRect to toRect; resolves when done.
+// If toImgSrc is given, swaps the image when the piece arrives (before removing).
+function animatePiece(imgSrc, fromRect, toRect, toImgSrc = null) {
+  return new Promise(resolve => {
+    const img = document.createElement('img');
+    img.src = imgSrc;
+    img.style.cssText = [
+      'position:fixed', 'pointer-events:none', 'z-index:1000',
+      `left:${fromRect.left}px`, `top:${fromRect.top}px`,
+      `width:${fromRect.width}px`, `height:${fromRect.height}px`,
+    ].join(';');
+    document.body.appendChild(img);
+    img.getBoundingClientRect(); // force layout before starting transition
+    img.style.transition = 'left 0.18s ease-in-out, top 0.18s ease-in-out';
+    img.style.left = `${toRect.left}px`;
+    img.style.top  = `${toRect.top}px`;
+    img.addEventListener('transitionend', () => {
+      if (toImgSrc) img.src = toImgSrc;
+      img.remove();
+      resolve();
+    }, { once: true });
+  });
+}
+
+// Returns [col, rowNum] from a coord string like "b3"
+function parseCoord(s) {
+  return [s.charCodeAt(0) - 'a'.charCodeAt(0), parseInt(s[1])];
+}
+
+// Apply a move locally to a parsed position, returning a new parsed object.
+function applyMoveLocally(parsed, mv, mover) {
+  const grid = parsed.grid.map(row => [...row]);
+  const senteHand = [...parsed.senteHand];
+  const goteHand  = [...parsed.goteHand];
+  const hand = mover === 'sente' ? senteHand : goteHand;
+
+  if (mv.includes('*')) {
+    const [kindChar, toStr] = mv.split('*');
+    const kind = kindChar.toUpperCase();
+    const [toCol, toRow] = parseCoord(toStr);
+    hand.splice(hand.indexOf(kind), 1);
+    grid[rowNumToStringIndex(toRow)][toCol] = { kind, owner: mover };
+  } else {
+    const [fromCol, fromRow] = parseCoord(mv.slice(0, 2));
+    const [toCol,   toRow]   = parseCoord(mv.slice(2, 4));
+    const fromIdx = rowNumToStringIndex(fromRow);
+    const toIdx   = rowNumToStringIndex(toRow);
+    const captured = grid[toIdx][toCol];
+    if (captured) {
+      const baseKind = captured.kind === 'H' ? 'C' : captured.kind;
+      (mover === 'sente' ? senteHand : goteHand).push(baseKind);
+    }
+    grid[toIdx][toCol]   = grid[fromIdx][fromCol];
+    grid[fromIdx][fromCol] = null;
+  }
+
+  return { grid, turn: mover === 'sente' ? 'gote' : 'sente', senteHand, goteHand };
+}
+
+// Build animation promise(s) for a move applied to a given parsed state.
+// For captures, also animates the captured piece flying to the mover's hand.
+function buildMoveAnimation(mv, mover, parsed) {
+  if (mv.includes('*')) {
+    // Drop: find the specific piece in hand by kind
+    const [kindChar, toStr] = mv.split('*');
+    const kind = kindChar.toUpperCase();
+    const [toCol, toRow] = parseCoord(toStr);
+    const handImg = document.querySelector(`#hand-${mover} .hand-piece[data-kind="${kind}"]`);
+    const toCell  = cellEl(toCol, toRow);
+    if (!handImg || !toCell) return Promise.resolve();
+    return animatePiece(pieceImageSrc(kind, mover),
+      handImg.getBoundingClientRect(), toCell.getBoundingClientRect());
+  }
+
+  const [fromCol, fromRow] = parseCoord(mv.slice(0, 2));
+  const [toCol,   toRow]   = parseCoord(mv.slice(2, 4));
+  const fromCell = cellEl(fromCol, fromRow);
+  const toCell   = cellEl(toCol, toRow);
+  if (!fromCell || !toCell) return Promise.resolve();
+  const piece = parsed.grid[rowNumToStringIndex(fromRow)][fromCol];
+  if (!piece) return Promise.resolve();
+
+  const moveAnim = animatePiece(
+    pieceImageSrc(piece.kind, piece.owner),
+    (fromCell.querySelector('img') || fromCell).getBoundingClientRect(),
+    toCell.getBoundingClientRect());
+
+  // If there's a capture, also animate the captured piece flying to the mover's hand.
+  const captured = parsed.grid[rowNumToStringIndex(toRow)][toCol];
+  if (!captured) return moveAnim;
+
+  const handEl = document.querySelector(`#hand-${mover} .hand-pieces`);
+  if (!handEl) return moveAnim;
+
+  const baseKind = captured.kind === 'H' ? 'C' : captured.kind;
+  const captureAnim = animatePiece(
+    pieceImageSrc(captured.kind, captured.owner),
+    (toCell.querySelector('img') || toCell).getBoundingClientRect(),
+    handEl.getBoundingClientRect(),
+    pieceImageSrc(baseKind, mover));  // swap to mover's facing on arrival
+
+  return Promise.all([moveAnim, captureAnim]);
 }
 
 // ─── Interaction ──────────────────────────────────────────────────────────────
@@ -305,27 +419,46 @@ async function startGame(playerChoice) {
 
 async function sendHumanMove(mv) {
   state.busy = true;
-  setStatus(`You played ${mv}. Thinking…`);
+  setStatus('Thinking…');
+
+  // ── 1. Capture rects and start human animation BEFORE any re-render ──
+  const humanAnim = buildMoveAnimation(mv, state.humanPlayer, state.parsed);
+
+  // ── 2. Immediately render intermediate state so piece appears at destination
+  //       when the overlay animation completes ──
+  const intermediate = applyMoveLocally(state.parsed, mv, state.humanPlayer);
+  state.parsed = intermediate;
+  state.possibleMoves = [];
   renderBoard();
+
+  // ── 3. Fire server request in parallel with human animation ──
+  let res;
   try {
-    const res = await rpcCall('make_move', { game_id: state.gameId, move: mv });
-    applyServerResponse(res.position, res.possible_moves, res.game_result);
-    if (res.game_result === 'YouWon') {
-      setStatus('You won!');
-    } else if (res.game_result === 'IWon') {
-      setStatus(`AI played ${res.last_move}. AI wins!`);
-    } else if (res.game_result === 'Draw') {
-      setStatus('Draw!');
-    } else {
-      setStatus(`AI played ${res.last_move}. Your turn.`);
-    }
+    [res] = await Promise.all([
+      rpcCall('make_move', { game_id: state.gameId, move: mv }),
+      humanAnim,
+    ]);
   } catch (err) {
     setStatus(`Error: ${err.message}`);
-    // Re-render to restore previous state
-    renderBoard();
-  } finally {
     state.busy = false;
+    renderBoard();
+    return;
   }
+
+  // ── 4. Animate AI move using the already-rendered intermediate board ──
+  const aiOwner = state.humanPlayer === 'sente' ? 'gote' : 'sente';
+  if (res.last_move && !res.game_result) {
+    await buildMoveAnimation(res.last_move, aiOwner, intermediate);
+  }
+
+  // ── 4. Apply final state ──
+  applyServerResponse(res.position, res.possible_moves, res.game_result);
+  if (res.game_result === 'YouWon')     setStatus('You won!');
+  else if (res.game_result === 'IWon')  setStatus(`AI played ${res.last_move}. AI wins!`);
+  else if (res.game_result === 'Draw')  setStatus('Draw!');
+  else                                  setStatus(`AI played ${res.last_move}. Your turn.`);
+
+  state.busy = false;
 }
 
 function applyServerResponse(position, possibleMoves, gameResult) {
@@ -339,28 +472,33 @@ function applyServerResponse(position, possibleMoves, gameResult) {
 
 // ─── Setup screen ─────────────────────────────────────────────────────────────
 
-function showGame() {
-  $('setup-screen').hidden = true;
-  $('game-screen').hidden = false;
-}
+const INITIAL_POSITION = 'gle/1c1/1C1/ELG b -';
 
 function showSetup() {
-  $('setup-screen').hidden = false;
-  $('game-screen').hidden = true;
+  $('setup-screen').classList.remove('hidden');
+  // Show initial position on the board (non-interactive, Sente perspective)
   state.gameId = null;
-  state.position = null;
-  state.parsed = null;
+  state.position = INITIAL_POSITION;
+  state.parsed = parsePosition(INITIAL_POSITION);
+  state.humanPlayer = 'sente'; // render from Sente perspective by default
   state.possibleMoves = [];
   state.selected = null;
   state.gameResult = null;
+  state.busy = true; // prevent interaction
+  renderBoard();
 }
 
 $('btn-play-first').addEventListener('click', () => {
-  showGame();
+  $('setup-screen').classList.add('hidden');
+  state.busy = false;
   startGame(0);
 });
 $('btn-play-second').addEventListener('click', () => {
-  showGame();
+  $('setup-screen').classList.add('hidden');
+  state.busy = false;
   startGame(1);
 });
 $('btn-new-game').addEventListener('click', showSetup);
+
+// Show initial position immediately on page load
+showSetup();

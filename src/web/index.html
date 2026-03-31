@@ -10,13 +10,7 @@
   <div id="app">
     <h1>Dōbutsu Shōgi</h1>
 
-    <div id="setup-screen">
-      <p>Play as:</p>
-      <button id="btn-play-first">First (Sente)</button>
-      <button id="btn-play-second">Second (Gote)</button>
-    </div>
-
-    <div id="game-screen" hidden>
+    <div id="game-screen">
       <div id="status-bar"></div>
 
       <!-- Gote's captured pieces (top) -->
@@ -27,6 +21,7 @@
 
       <!-- 3×4 board -->
       <div id="board">
+        <img id="board-bg" src="assets/board.svg" alt="">
         <!-- cells injected by JS, row 4 (top) first -->
       </div>
 
@@ -34,6 +29,13 @@
       <div id="hand-sente" class="hand hand-sente">
         <span class="hand-label">Sente's hand:</span>
         <div class="hand-pieces"></div>
+      </div>
+
+      <!-- Setup overlay: shown at start and after New Game -->
+      <div id="setup-screen">
+        <p>Play as:</p>
+        <button id="btn-play-first">Sente</button>
+        <button id="btn-play-second">Gote</button>
       </div>
 
       <button id="btn-new-game">New Game</button>
