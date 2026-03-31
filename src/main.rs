@@ -71,6 +71,9 @@ struct Argv {
     // Exploration softness for MCTS
     #[arg(long, default_value_t = 3.0)]
     softness: f64,
+    // Max tree depth per MCTS rollout
+    #[arg(long, default_value_t = 8)]
+    max_depth: i32,
     #[arg(long)]
     model_file: Option<String>,
     #[arg(short='t', long)]
@@ -91,7 +94,7 @@ struct Argv {
 
 fn play_with_evaluator<EvalT: Evaluator<GamePosition>>(eval: &EvalT, args: &Argv) {
     let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
-        eval, args.num_tries, args.softness);
+        eval, args.num_tries, args.softness, args.max_depth);
     play_cmd_line(args.human_player, &mut strat);
 }
 
@@ -117,7 +120,7 @@ fn main() {
             }
             let pos = GamePosition::from_str(&fen).expect("invalid FEN");
             let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
-                &kids_shogi::SimpleEvaluator{}, args.num_tries, args.softness);
+                &kids_shogi::SimpleEvaluator{}, args.num_tries, args.softness, args.max_depth);
             let mv = strat.choose_move(&pos).expect("no moves");
             let new_pos = pos.make_move(&mv).expect("chosen move must be valid");
             half_moves += 1;
@@ -134,7 +137,7 @@ fn main() {
     if args.server {
         let addr = args.listen.parse().expect("invalid listen address");
         static EVAL: kids_shogi::SimpleEvaluator = kids_shogi::SimpleEvaluator {};
-        let io = rpc::create_io_handler(mcts::MctsFactory::new(&EVAL, args.num_tries, args.softness));
+        let io = rpc::create_io_handler(mcts::MctsFactory::new(&EVAL, args.num_tries, args.softness, args.max_depth));
         println!("Serving at http://{} (GUI: /, RPC: /rpc)", args.listen);
         static_server::serve(io, args.web_root, addr);
         return;

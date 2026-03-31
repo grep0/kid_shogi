@@ -132,12 +132,13 @@ pub struct MctsFactory<PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT> + Sync
     pub eval: &'static EvalT,
     pub num_tries: usize,
     pub softness: f64,
+    pub max_depth: i32,
     _pos: PhantomData<PosT>,
 }
 
 impl<PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT> + Sync + 'static> MctsFactory<PosT, EvalT> {
-    pub fn new(eval: &'static EvalT, num_tries: usize, softness: f64) -> Self {
-        MctsFactory { eval, num_tries, softness, _pos: PhantomData }
+    pub fn new(eval: &'static EvalT, num_tries: usize, softness: f64, max_depth: i32) -> Self {
+        MctsFactory { eval, num_tries, softness, max_depth, _pos: PhantomData }
     }
 }
 
@@ -150,7 +151,7 @@ where
     EvalT: ag::Evaluator<PosT> + Sync + Send + 'static,
 {
     fn create(&self) -> Box<dyn strategy::StrategyEngine<PosT>> {
-        Box::new(MonteCarloTreeSearchStrategy::new(self.eval, self.num_tries, self.softness))
+        Box::new(MonteCarloTreeSearchStrategy::new(self.eval, self.num_tries, self.softness, self.max_depth))
     }
 }
 
@@ -163,8 +164,8 @@ pub struct MonteCarloTreeSearchStrategy<'a, PosT: ag::AbstractGame, EvalT: ag::E
 }
 
 impl<'a, PosT: ag::AbstractGame, EvalT: ag::Evaluator<PosT>> MonteCarloTreeSearchStrategy<'a, PosT, EvalT> {
-    pub fn new(eval: &'a EvalT, num_tries: usize, softness: f64) -> Self {
-        return MonteCarloTreeSearchStrategy{eval: eval, num_tries: num_tries, softness: softness, max_depth: 8, phantom_data: PhantomData}
+    pub fn new(eval: &'a EvalT, num_tries: usize, softness: f64, max_depth: i32) -> Self {
+        return MonteCarloTreeSearchStrategy{eval: eval, num_tries: num_tries, softness: softness, max_depth, phantom_data: PhantomData}
     }
 
     fn walk_once(&mut self, start_pos: &PosT, state: &mut MCTSState<PosT>) {
@@ -223,7 +224,7 @@ pub mod tests {
         let pos = agt::OneTwoGame::from_str("8 0").unwrap();
         let eval = strategy::OneStepEvaluator::<agt::OneTwoGame>::new();
         let mut strat = MonteCarloTreeSearchStrategy::new(
-            &eval, 32, 3.0);
+            &eval, 32, 3.0, 8);
         let mv = strat.choose_move(&pos);
         assert_eq!(mv.unwrap(), "2");
     }
