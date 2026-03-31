@@ -75,6 +75,9 @@ struct Argv {
     model_file: Option<String>,
     #[arg(short='t', long)]
     train: bool,
+    // Engine mode: read a FEN position from stdin, print the chosen move to stdout, exit
+    #[arg(short='e', long)]
+    engine: bool,
     // Run JSON-RPC HTTP server instead of CLI game
     #[arg(short='s', long)]
     server: bool,
@@ -99,6 +102,37 @@ fn main() {
     let args = Argv::parse();
     if args.train || args.model_file.is_some() {
         unimplemented!("neural network support is temporarily disabled");
+    }
+    if args.engine {
+        // Loop protocol: read a FEN line, print the resulting FEN after our move.
+        // When the game ends, print "1-0" (Sente wins), "0-1" (Gote wins), or
+        // "1/2-1/2" (draw after MAX_HALF_MOVES half-moves without a result).
+        // The match runner feeds each engine's output directly into the other's input.
+        use std::io::BufRead;
+        const MAX_HALF_MOVES: usize = 100;
+        let mut half_moves: usize = 0;
+        let stdin = std::io::stdin();
+        for line in stdin.lock().lines() {
+            let fen = line.expect("read error");
+            if half_moves >= MAX_HALF_MOVES {
+                println!("1/2-1/2");
+                break;
+            }
+            let pos = GamePosition::from_str(&fen).expect("invalid FEN");
+            let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
+                &kids_shogi::SimpleEvaluator{}, args.num_tries, args.softness);
+            let mv = strat.choose_move(&pos).expect("no moves");
+            let new_pos = pos.make_move(&mv).expect("chosen move must be valid");
+            half_moves += 1;
+            if new_pos.is_lost() {
+                // current_player of new_pos is the one who lost
+                let result = if new_pos.current_player() == 0 { "0-1" } else { "1-0" };
+                println!("{}", result);
+                break;
+            }
+            println!("{}", new_pos.to_str());
+        }
+        return;
     }
     if args.server {
         use jsonrpc_http_server::{ServerBuilder, DomainsValidation, AccessControlAllowOrigin};
