@@ -81,12 +81,9 @@ struct Argv {
     // Run JSON-RPC HTTP server instead of CLI game
     #[arg(short='s', long)]
     server: bool,
-    // Address for the JSON-RPC API
-    #[arg(long, default_value = "127.0.0.1:3030")]
-    listen: String,
-    // Address for the static web UI server
+    // Address for the combined HTTP server (GUI + RPC at /rpc)
     #[arg(long, default_value = "127.0.0.1:8080")]
-    web_listen: String,
+    listen: String,
     // Directory to serve static web UI files from
     #[arg(long, default_value = "src/web")]
     web_root: std::path::PathBuf,
@@ -135,22 +132,11 @@ fn main() {
         return;
     }
     if args.server {
-        use jsonrpc_http_server::{ServerBuilder, DomainsValidation, AccessControlAllowOrigin};
-
-        let web_addr = args.web_listen.parse().expect("invalid web-listen address");
-        let web_root = args.web_root.clone();
-        std::thread::spawn(move || static_server::serve(web_root, web_addr));
-        println!("Web UI at http://{}", args.web_listen);
-
-        let rpc_addr = args.listen.parse().expect("invalid listen address");
+        let addr = args.listen.parse().expect("invalid listen address");
         static EVAL: kids_shogi::SimpleEvaluator = kids_shogi::SimpleEvaluator {};
         let io = rpc::create_io_handler(mcts::MctsFactory::new(&EVAL, args.num_tries, args.softness));
-        let server = ServerBuilder::new(io)
-            .cors(DomainsValidation::AllowOnly(vec![AccessControlAllowOrigin::Any]))
-            .start_http(&rpc_addr)
-            .expect("failed to start RPC server");
-        println!("RPC API at http://{}", args.listen);
-        server.wait();
+        println!("Serving at http://{} (GUI: /, RPC: /rpc)", args.listen);
+        static_server::serve(io, args.web_root, addr);
         return;
     }
     // TODO: when re-enabling neuro, restore mod neuro and the train/model_file branches:

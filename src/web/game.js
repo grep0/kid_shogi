@@ -1,5 +1,5 @@
 // Configuration
-const RPC_URL = `http://${window.location.hostname}:3030`;
+const RPC_URL = '/rpc';
 const ASSETS_BASE = 'assets/';
 
 // ─── RPC ─────────────────────────────────────────────────────────────────────
