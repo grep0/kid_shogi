@@ -2,28 +2,31 @@
 """
 Match runner for kid_shogi engines.
 
-Usage:
+Two-player match:
   python match.py <games> <binary1> [args1...] -- <binary2> [args2...]
 
+Round-robin tournament (3+ engines, separated by --):
+  python match.py <games_per_pair> <binary1> [args1...] -- <binary2> [args2...] -- ...
+
 Example:
-  python match.py 20 ./target/release/kid_shogi --num-tries 200 \
-      -- ./target/release/kid_shogi --num-tries 50
+  python match.py 20 ./kid_shogi --num-tries 100 \
+      -- ./kid_shogi --num-tries 500 \
+      -- ./kid_shogi --num-tries 1000
 
 Engine protocol (--engine mode):
-  - Each engine runs as a persistent subprocess.
-  - The match runner sends the initial FEN to the engine whose turn it is.
-  - Each engine reads a FEN from stdin, makes its move, and prints either:
+  - Each engine runs as a persistent subprocess per game.
+  - The match runner sends the initial FEN to the Sente engine.
+  - Each engine reads a FEN, makes its move, and prints either:
       • The new FEN (game continues — fed directly to the other engine), or
       • A result string: "1-0" (Sente wins), "0-1" (Gote wins), "1/2-1/2" (draw).
-  - The match runner only inspects lines for the three result strings;
-    everything else is forwarded verbatim to the other engine.
 
-Game alternation:
-  - Engine A plays Sente (moves first) in odd-numbered games, Gote in even ones.
+Game alternation (per pair):
+  - Engine A plays Sente in odd-numbered games of the pair, Gote in even ones.
 """
 
 import subprocess
 import sys
+import itertools
 
 INITIAL_FEN = "gle/1c1/1C1/ELG b -"
 RESULTS = {"1-0", "0-1", "1/2-1/2"}
@@ -51,16 +54,10 @@ def recv_line(proc: subprocess.Popen) -> str:
 
 
 def play_game(cmd_a: list[str], cmd_b: list[str], a_is_sente: bool) -> str:
-    """
-    Play one game. Returns 'A', 'B', or 'draw'.
-
-    Engine A is Sente when a_is_sente, otherwise Gote.
-    Sente moves first; the engine that is Sente receives the initial FEN.
-    """
+    """Play one game. Returns 'A', 'B', or 'draw'."""
     eng_a = start_engine(cmd_a)
     eng_b = start_engine(cmd_b)
 
-    # sente_eng moves first; gote_eng is the other
     if a_is_sente:
         sente_eng, gote_eng = eng_a, eng_b
         sente_label, gote_label = "A", "B"
@@ -70,26 +67,22 @@ def play_game(cmd_a: list[str], cmd_b: list[str], a_is_sente: bool) -> str:
 
     result = "draw"
     try:
-        # Sente receives the initial position
         send_line(sente_eng, INITIAL_FEN)
-        # Engines alternate: after Sente moves, Gote receives the output, etc.
         movers = [(sente_eng, sente_label), (gote_eng, gote_label)]
-        mover_idx = 0  # 0 = Sente just moved, feed output to Gote
+        mover_idx = 0
         while True:
-            current_eng, current_label = movers[mover_idx]
+            current_eng, _ = movers[mover_idx]
             response = recv_line(current_eng)
             if response in RESULTS:
                 if response == "1/2-1/2":
                     result = "draw"
                 elif response == "1-0":
-                    result = sente_label   # Sente wins
-                else:  # "0-1"
-                    result = gote_label    # Gote wins
+                    result = sente_label
+                else:
+                    result = gote_label
                 break
-            # Not a result: it's the next FEN — send to the other engine
             mover_idx = 1 - mover_idx
-            next_eng, _ = movers[mover_idx]
-            send_line(next_eng, response)
+            send_line(movers[mover_idx][0], response)
     finally:
         for eng in (eng_a, eng_b):
             try:
@@ -101,31 +94,16 @@ def play_game(cmd_a: list[str], cmd_b: list[str], a_is_sente: bool) -> str:
     return result
 
 
-def parse_args(argv):
-    if len(argv) < 4 or "--" not in argv:
-        print(__doc__)
-        sys.exit(1)
-    sep = argv.index("--")
-    games = int(argv[0])
-    binary1 = argv[1:sep]
-    binary2 = argv[sep + 1:]
-    if not binary1 or not binary2:
-        print("Both binaries must be specified around '--'")
-        sys.exit(1)
-    return games, binary1, binary2
-
-
-def main():
-    games, binary1, binary2 = parse_args(sys.argv[1:])
-
+def run_match(games: int, cmd_a: list[str], cmd_b: list[str],
+              label_a: str, label_b: str) -> tuple[int, int, int]:
+    """Run `games` games between two engines. Returns (wins_a, draws, wins_b)."""
     wins_a = draws = wins_b = 0
-
     for i in range(games):
         a_is_sente = (i % 2 == 0)
         try:
-            result = play_game(binary1, binary2, a_is_sente)
+            result = play_game(cmd_a, cmd_b, a_is_sente)
         except RuntimeError as e:
-            print(f"Game {i+1}: ERROR — {e}")
+            print(f"  Game {i+1}: ERROR — {e}")
             continue
 
         if result == "draw":
@@ -133,18 +111,95 @@ def main():
             tag = "draw"
         elif result == "A":
             wins_a += 1
-            tag = "A wins"
+            tag = f"{label_a} wins"
         else:
             wins_b += 1
-            tag = "B wins"
+            tag = f"{label_b} wins"
 
-        print(f"Game {i+1:3d} (A={'Sente' if a_is_sente else 'Gote '}): {tag}")
+        color_a = "Sente" if a_is_sente else "Gote "
+        print(f"  Game {i+1:3d} ({label_a}={color_a}): {tag}")
 
-    print()
-    print(f"Results after {games} games:")
-    print(f"  A wins : {wins_a}")
-    print(f"  Draws  : {draws}")
-    print(f"  B wins : {wins_b}")
+    return wins_a, draws, wins_b
+
+
+def parse_args(argv):
+    if len(argv) < 4 or "--" not in argv:
+        print(__doc__)
+        sys.exit(1)
+    games = int(argv[0])
+    engines = []
+    current = []
+    for tok in argv[1:]:
+        if tok == "--":
+            if current:
+                engines.append(current)
+            current = []
+        else:
+            current.append(tok)
+    if current:
+        engines.append(current)
+    if len(engines) < 2:
+        print("Need at least two engine specs separated by '--'")
+        sys.exit(1)
+    return games, engines
+
+
+def engine_label(cmd: list[str], idx: int) -> str:
+    """Short label for display: index + last component of binary path."""
+    import os
+    return f"E{idx+1}({os.path.basename(cmd[0])})"
+
+
+def main():
+    games, engines = parse_args(sys.argv[1:])
+    labels = [engine_label(cmd, i) for i, cmd in enumerate(engines)]
+
+    if len(engines) == 2:
+        # Simple two-engine match
+        w, d, l = run_match(games, engines[0], engines[1], labels[0], labels[1])
+        print()
+        print(f"Results after {games} games ({labels[0]} vs {labels[1]}):")
+        print(f"  {labels[0]} wins : {w}")
+        print(f"  Draws        : {d}")
+        print(f"  {labels[1]} wins : {l}")
+        return
+
+    # Round-robin: every pair plays `games` games
+    n = len(engines)
+    # scores[i] = points (win=1, draw=0.5, loss=0)
+    scores = [0.0] * n
+    wins   = [[0] * n for _ in range(n)]
+    draws  = [[0] * n for _ in range(n)]
+
+    pairs = list(itertools.combinations(range(n), 2))
+    total_pairs = len(pairs)
+    for match_num, (i, j) in enumerate(pairs, 1):
+        print(f"\n=== Match {match_num}/{total_pairs}: {labels[i]} vs {labels[j]} ===")
+        w, d, l = run_match(games, engines[i], engines[j], labels[i], labels[j])
+        wins[i][j] = w
+        wins[j][i] = l
+        draws[i][j] = draws[j][i] = d
+        scores[i] += w + 0.5 * d
+        scores[j] += l + 0.5 * d
+
+    # Final standings
+    print("\n" + "=" * 60)
+    print("FINAL STANDINGS")
+    print("=" * 60)
+    order = sorted(range(n), key=lambda x: -scores[x])
+    col = max(len(lb) for lb in labels) + 2
+    header = f"{'Engine':<{col}}" + "".join(f"{labels[j]:>6}" for j in range(n)) + f"{'Points':>8}"
+    print(header)
+    print("-" * len(header))
+    for i in order:
+        row = f"{labels[i]:<{col}}"
+        for j in range(n):
+            if i == j:
+                row += f"{'---':>6}"
+            else:
+                row += f"{wins[i][j]}+{draws[i][j]:>3}"
+        row += f"{scores[i]:>8.1f}"
+        print(row)
 
 
 if __name__ == "__main__":
