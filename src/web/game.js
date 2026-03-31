@@ -398,6 +398,10 @@ function onHandPieceClick(kind) {
 // ─── Server calls ─────────────────────────────────────────────────────────────
 
 async function startGame(playerChoice) {
+  if (state.gameId) {
+    rpcCall('remove_game', { game_id: state.gameId }).catch(() => {});
+    state.gameId = null;
+  }
   state.busy = true;
   setStatus('Starting game…');
   try {

@@ -22,6 +22,11 @@ struct StartGameResponse {
 }
 
 #[derive(serde::Deserialize)]
+struct RemoveGameRequest {
+    game_id: String,
+}
+
+#[derive(serde::Deserialize)]
 struct MakeMoveRequest {
     game_id: String,
     #[serde(rename = "move")]
@@ -123,6 +128,13 @@ impl<PosT: AbstractGame + Send + 'static, FactoryT: StrategyFactory<PosT>> GameS
         Ok(serde_json::to_value(&response).unwrap())
     }
 
+    fn remove_game(&self, params: Params) -> Result<Value, Error> {
+        let request: RemoveGameRequest = params.parse()
+            .map_err(|e| Error::invalid_params(e.message))?;
+        self.registry.lock().unwrap().remove(&request.game_id);
+        Ok(Value::Null)
+    }
+
     fn make_move(&self, params: Params) -> Result<Value, Error> {
         let request: MakeMoveRequest = params.parse()
             .map_err(|e| Error::invalid_params(e.message))?;
@@ -179,6 +191,8 @@ where
     io.add_sync_method("start_game", move |params| s1.start_game(params));
     let s2 = Arc::clone(&server);
     io.add_sync_method("make_move", move |params| s2.make_move(params));
+    let s3 = Arc::clone(&server);
+    io.add_sync_method("remove_game", move |params| s3.remove_game(params));
     io
 }
 
