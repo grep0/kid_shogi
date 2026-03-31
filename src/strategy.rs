@@ -8,9 +8,10 @@ use rand::rngs::StdRng;
 use rand::distributions::WeightedIndex;
 
 pub trait StrategyEngine<PosT: ag::AbstractGame> {
-    fn choose_move(&mut self, pos: &PosT) -> Option<String>; 
+    fn choose_move(&mut self, pos: &PosT) -> Option<String>;
 }
 
+#[derive(Clone)]
 pub struct RandomMoveStrategy {
     rng : StdRng,
 }
@@ -27,6 +28,7 @@ impl<PosT: ag::AbstractGame> StrategyEngine<PosT> for RandomMoveStrategy {
     }
 }
 
+#[derive(Clone)]
 pub struct FindWinningMoveStrategy<PosT: ag::AbstractGame, FollowupStrategy: StrategyEngine<PosT>> {
     followup: FollowupStrategy,
     pos_type: PhantomData<PosT>,

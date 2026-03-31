@@ -161,21 +161,21 @@ pub enum Cell {
 pub type Cells = ArrayVec<Cell, 12>;
 
 #[derive(Debug, Clone)]
-pub struct Position {
+pub struct KidsShogiGame {
     cells: Cells,
     sente_hand: Vec<PieceKind>,
     gote_hand: Vec<PieceKind>,
     current_player: Color,
 }
 
-impl Position {
+impl KidsShogiGame {
     const CELL_COUNT: usize = 12;
 
     fn find_all_pieces(self: &Self, color: Color) -> Vec<(Point, PieceKind)> {
         self.cells.iter().enumerate().filter_map(|(xy, cell)|
             match cell {
                 Cell::Piece(pk, c) =>
-                    {if *c==color {Some((Position::c_to_p(xy), *pk))} else {None}},
+                    {if *c==color {Some((KidsShogiGame::c_to_p(xy), *pk))} else {None}},
                 _ => None
             }
         ).collect()
@@ -236,9 +236,9 @@ impl Move {
     }
 }
 
-impl Position {
-    pub fn empty() -> Position {
-        return Position {
+impl KidsShogiGame {
+    pub fn empty() -> KidsShogiGame {
+        return KidsShogiGame {
             cells: Cells::from([Cell::Empty; 12]),
             sente_hand: Vec::new(),
             gote_hand: Vec::new(),
@@ -246,8 +246,8 @@ impl Position {
         }
     }
 
-    pub fn swap_sides(self: &Self) -> Position {
-        return Position {
+    pub fn swap_sides(self: &Self) -> KidsShogiGame {
+        return KidsShogiGame {
             cells: self.cells.iter().rev().map(
                 |cell|
                     match cell {
@@ -260,22 +260,22 @@ impl Position {
         }
     }
 
-    fn make_move_sente(self: &Self, mv: &Move) -> Option<Position> {
+    fn make_move_sente(self: &Self, mv: &Move) -> Option<KidsShogiGame> {
         match mv {
             Move::Step(from, to) => {
-                let from_cell = &self.cells[Position::p_to_c(from)];
+                let from_cell = &self.cells[KidsShogiGame::p_to_c(from)];
                 if let Cell::Piece(pk, Color::Sente) = from_cell {
                     if !pk.is_valid_move(from, to) {
                         return None
                     }
-                    let to_cell = &self.cells[Position::p_to_c(to)];
+                    let to_cell = &self.cells[KidsShogiGame::p_to_c(to)];
                     let maybe_promoted = if to.1==3 { pk.promote() } else {*pk};
                     match to_cell {
                         Cell::Empty => {
                             let mut new_cells = self.cells.clone();
-                            new_cells[Position::p_to_c(to)] = Cell::Piece(maybe_promoted, Color::Sente);
-                            new_cells[Position::p_to_c(from)] = Cell::Empty;
-                            return Some(Position {
+                            new_cells[KidsShogiGame::p_to_c(to)] = Cell::Piece(maybe_promoted, Color::Sente);
+                            new_cells[KidsShogiGame::p_to_c(from)] = Cell::Empty;
+                            return Some(KidsShogiGame {
                                 cells: new_cells,
                                 sente_hand: self.sente_hand.clone(),
                                 gote_hand: self.gote_hand.clone(),
@@ -284,11 +284,11 @@ impl Position {
                         }
                         Cell::Piece(qk, Color::Gote) => {
                             let mut new_cells = self.cells.clone();
-                            new_cells[Position::p_to_c(to)] = Cell::Piece(maybe_promoted, Color::Sente);
-                            new_cells[Position::p_to_c(from)] = Cell::Empty;
+                            new_cells[KidsShogiGame::p_to_c(to)] = Cell::Piece(maybe_promoted, Color::Sente);
+                            new_cells[KidsShogiGame::p_to_c(from)] = Cell::Empty;
                             let mut new_hand = self.sente_hand.clone();
                             new_hand.push(qk.demote());
-                            return Some(Position {
+                            return Some(KidsShogiGame {
                                 cells: new_cells,
                                 sente_hand: new_hand,
                                 gote_hand: self.gote_hand.clone(),
@@ -300,13 +300,13 @@ impl Position {
                 }
             }
             Move::Drop(pk, to) => {
-                if let Cell::Piece(_,_) = self.cells[Position::p_to_c(to)] {
+                if let Cell::Piece(_,_) = self.cells[KidsShogiGame::p_to_c(to)] {
                     return None  // cannot drop on the head
                 }
                 if let Some(new_hand) = take_piece(&self.sente_hand, *pk) {
                     let mut new_cells = self.cells.clone();
-                    new_cells[Position::p_to_c(to)] = Cell::Piece(*pk, Color::Sente);
-                    return Some(Position {
+                    new_cells[KidsShogiGame::p_to_c(to)] = Cell::Piece(*pk, Color::Sente);
+                    return Some(KidsShogiGame {
                         cells: new_cells,
                         sente_hand: new_hand,
                         gote_hand: self.gote_hand.clone(),
@@ -321,7 +321,7 @@ impl Position {
         return None
     }
 
-    pub fn make_move_impl(self: &Self, mv: &Move) -> Option<Position> {
+    pub fn make_move_impl(self: &Self, mv: &Move) -> Option<KidsShogiGame> {
         match self.current_player {
             Color::Sente => { self.make_move_sente(mv) },
             Color::Gote => { self.swap_sides()
@@ -336,7 +336,7 @@ impl Position {
             return true;
         }
         if let Some(xy) = self.cells.iter().position(|v| *v == Cell::Piece(PieceKind::Lion, Color::Sente)) {
-            let our_lion_pos = Position::c_to_p(xy);
+            let our_lion_pos = KidsShogiGame::c_to_p(xy);
             if our_lion_pos.1==3 {
                 // If any opponent's pieces attacks our lion, nope
                 let opp_pieces = self.find_all_pieces(Color::Gote);
@@ -370,7 +370,7 @@ impl Position {
         let uniq_drops = self.sente_hand.iter().collect::<HashSet<_>>();
         let empty_loc = self.cells.iter().enumerate().filter_map(
             |(xy, &cell)| match cell {
-                Cell::Empty => Some(Position::c_to_p(xy)),
+                Cell::Empty => Some(KidsShogiGame::c_to_p(xy)),
                 _ => None
             }).collect::<Vec<_>>();
         let drops = uniq_drops.into_iter()
@@ -401,7 +401,7 @@ impl Position {
             let mut empties=0;
             if y!=3 {res.append('/')}
             for x in 0..3 {
-                match self.cells[Position::p_to_c(&Point(x,y))] {
+                match self.cells[KidsShogiGame::p_to_c(&Point(x,y))] {
                     Cell::Empty => { empties+=1 }
                     Cell::Piece(pk, color) => {
                         if empties>0 { res.append(empties.to_string()) }
@@ -432,7 +432,7 @@ impl Position {
         if pieces.len() != 3 { return None }
         let rows = pieces[0].split('/').collect::<Vec<_>>();
         if rows.len() != 4 { return None }
-        let mut pos = Position::empty();
+        let mut pos = KidsShogiGame::empty();
         for y in 0..4 {
             let row = rows[3-y];
             let mut x: usize = 0;
@@ -442,12 +442,12 @@ impl Position {
                     x += c.to_digit(10).unwrap() as usize
                 } else if c.is_ascii_lowercase() {
                     if let Some(pk) = PieceKind::from_fen_char(c) {
-                        pos.cells[Position::p_to_c(&Point(x,y))] = Cell::Piece(pk, Color::Gote);
+                        pos.cells[KidsShogiGame::p_to_c(&Point(x,y))] = Cell::Piece(pk, Color::Gote);
                         x += 1
                     } else { return None }
                 } else if c.is_ascii_uppercase() {
                     if let Some(pk) = PieceKind::from_fen_char(c.to_ascii_lowercase()) {
-                        pos.cells[Position::p_to_c(&Point(x,y))] = Cell::Piece(pk, Color::Sente);
+                        pos.cells[KidsShogiGame::p_to_c(&Point(x,y))] = Cell::Piece(pk, Color::Sente);
                         x += 1
                     }
                 } else { return None }
@@ -475,7 +475,7 @@ impl Position {
     }
 }
 
-impl ag::AbstractGame for Position {
+impl ag::AbstractGame for KidsShogiGame {
     fn possible_moves(self: &Self) -> Vec<String> {
         self.list_possible_moves().into_iter().map(|mv| mv.to_fen()).collect()
     }
@@ -507,7 +507,7 @@ impl ag::AbstractGame for Position {
             lines.push(
                 (0..3).map(|x| {
                     let pt = Point(x,y);
-                    let c = match self.cells[Position::p_to_c(&pt)] {
+                    let c = match self.cells[KidsShogiGame::p_to_c(&pt)] {
                         Cell::Empty => '.',
                         Cell::Piece(pt, Color::Sente) => pt.to_fen_char().to_ascii_uppercase(),
                         Cell::Piece(pt, Color::Gote) => pt.to_fen_char(),
@@ -538,7 +538,7 @@ impl ag::AbstractGame for Position {
             Cell::Piece(PieceKind::Giraffe, Color::Gote),
             Cell::Piece(PieceKind::Lion, Color::Gote),
             Cell::Piece(PieceKind::Elephant, Color::Gote)]);
-        return Position{
+        return KidsShogiGame{
             cells: cells,
             sente_hand: Vec::new(),
             gote_hand: Vec::new(),
@@ -547,11 +547,11 @@ impl ag::AbstractGame for Position {
     }
 
     fn from_str(s: &str) -> Option<Self> {
-        Position::from_fen(s)
+        KidsShogiGame::from_fen(s)
     }
 }
 
-impl ag::NeuroPosition for Position {
+impl ag::NeuroPosition for KidsShogiGame {
     fn encode(self: &Self) -> Vec<f64> {
         fn delta(size: usize, pos: usize) -> Vec<f64> {
             let mut d = vec![0.0; size];
@@ -583,7 +583,7 @@ impl ag::NeuroPosition for Position {
         field
     }
     fn encode_length() -> usize {
-        Position::CELL_COUNT*PieceKind::COUNT*2 + PieceKind::IN_HAND_COUNT*2*2 + 2
+        KidsShogiGame::CELL_COUNT*PieceKind::COUNT*2 + PieceKind::IN_HAND_COUNT*2*2 + 2
     }
 }
 
@@ -591,12 +591,12 @@ impl ag::NeuroPosition for Position {
 // c=1, g=e=3, h=5
 pub struct SimpleEvaluator {}
 
-impl ag::Evaluator<Position> for SimpleEvaluator {
+impl ag::Evaluator<KidsShogiGame> for SimpleEvaluator {
     fn saturation(&self) -> f64 {
         // Max possible piece advantage = (2*5+2*3+2*3)/2 = 11
         20.0
     }
-    fn evaluate_position(&self, pos: &Position) -> f64 {
+    fn evaluate_position(&self, pos: &KidsShogiGame) -> f64 {
         if pos.is_lost() {
             return -self.saturation()
         }

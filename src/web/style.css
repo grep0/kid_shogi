@@ -1,0 +1,167 @@
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: sans-serif;
+  background: #f5e9d0;
+  display: flex;
+  justify-content: center;
+  padding: 2rem 1rem;
+  margin: 0;
+}
+
+#app {
+  text-align: center;
+}
+
+h1 {
+  font-size: 1.6rem;
+  margin-bottom: 1.5rem;
+  color: #3a2a1a;
+}
+
+/* ── Setup screen ─────────────────────────────────────────── */
+
+#setup-screen p {
+  font-size: 1.1rem;
+  margin-bottom: 0.8rem;
+}
+
+#setup-screen button {
+  margin: 0.25rem;
+  padding: 0.6rem 1.4rem;
+  font-size: 1rem;
+  cursor: pointer;
+  border: 2px solid #6b4c2a;
+  border-radius: 6px;
+  background: #fff8ee;
+  color: #3a2a1a;
+}
+
+#setup-screen button:hover { background: #ffe8c0; }
+
+/* ── Status bar ───────────────────────────────────────────── */
+
+#game-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#status-bar {
+  font-size: 1rem;
+  min-height: 1.6em;
+  margin-bottom: 0.6rem;
+  color: #5a3a1a;
+}
+
+/* ── Board ────────────────────────────────────────────────── */
+
+#board {
+  display: grid;
+  grid-template-columns: repeat(3, 80px);
+  grid-template-rows: repeat(4, 80px);
+  gap: 4px;
+  background: #8b6340;
+  padding: 4px;
+  border: 3px solid #5a3a1a;
+  border-radius: 4px;
+  display: inline-grid;
+}
+
+.cell {
+  background: #d4a96a;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  position: relative;
+  border-radius: 2px;
+}
+
+.cell.selectable { cursor: pointer; }
+.cell.selectable:hover { background: #e8c080; }
+
+.cell.selected {
+  background: #a8d080;
+  outline: 3px solid #4a8a20;
+}
+
+.cell.reachable {
+  background: #b8d8f8;
+  cursor: pointer;
+}
+.cell.reachable:hover { background: #90c8f0; }
+
+.cell.reachable::after {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(30, 100, 200, 0.35);
+  position: absolute;
+}
+
+/* Hide the dot when there's a piece to capture */
+.cell.reachable .piece ~ ::after { display: none; }
+
+/* ── Pieces ───────────────────────────────────────────────── */
+
+.piece {
+  width: 64px;
+  height: 64px;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ── Hand areas ───────────────────────────────────────────── */
+
+.hand {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  background: #e8d0a8;
+  border: 2px solid #8b6340;
+  border-radius: 6px;
+  margin: 0.5rem 0;
+  min-height: 64px;
+}
+
+.hand-label {
+  font-size: 0.8rem;
+  color: #5a3a1a;
+  white-space: nowrap;
+}
+
+.hand-pieces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hand-piece {
+  width: 52px;
+  height: 52px;
+  pointer-events: auto;
+}
+
+.hand-piece.selectable { cursor: pointer; }
+.hand-piece.selectable:hover { filter: brightness(1.15); }
+.hand-piece.selected { outline: 3px solid #4a8a20; border-radius: 4px; }
+
+/* ── New game button ──────────────────────────────────────── */
+
+#btn-new-game {
+  margin-top: 1rem;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border: 2px solid #6b4c2a;
+  border-radius: 6px;
+  background: #fff8ee;
+  color: #3a2a1a;
+}
+
+#btn-new-game:hover { background: #ffe8c0; }

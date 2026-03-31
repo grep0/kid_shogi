@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dōbutsu Shōgi</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <h1>Dōbutsu Shōgi</h1>
+
+    <div id="setup-screen">
+      <p>Play as:</p>
+      <button id="btn-play-first">First (Sente)</button>
+      <button id="btn-play-second">Second (Gote)</button>
+    </div>
+
+    <div id="game-screen" hidden>
+      <div id="status-bar"></div>
+
+      <!-- Gote's captured pieces (top) -->
+      <div id="hand-gote" class="hand hand-gote">
+        <span class="hand-label">Gote's hand:</span>
+        <div class="hand-pieces"></div>
+      </div>
+
+      <!-- 3×4 board -->
+      <div id="board">
+        <!-- cells injected by JS, row 4 (top) first -->
+      </div>
+
+      <!-- Sente's captured pieces (bottom) -->
+      <div id="hand-sente" class="hand hand-sente">
+        <span class="hand-label">Sente's hand:</span>
+        <div class="hand-pieces"></div>
+      </div>
+
+      <button id="btn-new-game">New Game</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

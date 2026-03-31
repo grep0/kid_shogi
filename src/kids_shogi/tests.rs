@@ -39,7 +39,7 @@ fn take_piece_success() {
 
 #[test]
 fn initial_position() {
-    let pos = Position::initial();
+    let pos = KidsShogiGame::initial();
     assert_eq!(pos.to_str(), "gle/1c1/1C1/ELG b -");
     let moves = pos.possible_moves();
     assert_eq!(moves.len(), 4);  // one c, one g, two l
@@ -51,7 +51,7 @@ fn initial_position() {
 
 #[test]
 fn a_few_moves() {
-    let pos = Position::initial();
+    let pos = KidsShogiGame::initial();
     let mv1 = Move::Step(Point(1,1), Point(1,2));
     let pos1 = pos.make_move_impl(&mv1).unwrap();
     assert_eq!(pos1.to_fen(), "gle/1C1/3/ELG w C");
@@ -66,13 +66,13 @@ fn a_few_moves() {
 #[test]
 fn pos_from_fen() {
     let fen = "gl1/1e1/3/ELG b Cc";
-    let pos = Position::from_fen(fen).unwrap();
+    let pos = KidsShogiGame::from_fen(fen).unwrap();
     assert_eq!(pos.to_fen(), fen);
 }
 
 #[test]
 fn chicken_promotion() {
-    let pos = Position::from_fen("l2/2C/3/L2 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("l2/2C/3/L2 b -").unwrap();
     let mv = Move::Step(Point(2,2), Point(2,3));
     let pos2 = pos.make_move_impl(&mv).unwrap();
     assert_eq!(pos2.to_fen(), "l1H/3/3/L2 w -")
@@ -80,7 +80,7 @@ fn chicken_promotion() {
 
 #[test]
 fn demote_on_capture() {
-    let pos = Position::from_fen("l2/2h/2C/L2 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("l2/2h/2C/L2 b -").unwrap();
     let mv = Move::from_fen("c2c3").unwrap();
     let pos2 = pos.make_move_impl(&mv).unwrap();
     assert_eq!(pos2.to_fen(), "l2/2C/3/L2 w C")
@@ -88,7 +88,7 @@ fn demote_on_capture() {
 
 #[test]
 fn win_sente_on_lion_capture() {
-    let pos = Position::from_fen("l2/G2/3/L2 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("l2/G2/3/L2 b -").unwrap();
     let mv = Move::from_fen("a3a4").unwrap();
     let pos2 = pos.make_move_impl(&mv).unwrap();
     assert!(pos2.is_lost());
@@ -96,7 +96,7 @@ fn win_sente_on_lion_capture() {
 
 #[test]
 fn win_on_lion_passed() {
-    let pos = Position::from_fen("l2/G1L/3/3 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("l2/G1L/3/3 b -").unwrap();
     let mv = Move::from_fen("c3c4").unwrap();
     let pos2 = pos.make_move_impl(&mv).unwrap();
     assert!(pos2.is_lost());
@@ -104,7 +104,7 @@ fn win_on_lion_passed() {
 
 #[test]
 fn no_win_on_lion_passed_under_attack() {
-    let pos = Position::from_fen("lg1/G1L/3/3 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("lg1/G1L/3/3 b -").unwrap();
     let mv = Move::from_fen("c3c4").unwrap();
     let pos2 = pos.make_move_impl(&mv).unwrap();
     assert!(!pos2.is_lost());
@@ -112,7 +112,7 @@ fn no_win_on_lion_passed_under_attack() {
 
 #[test]
 fn win_gote_on_lion_capture() {
-    let pos = Position::from_fen("l2/G2/1e1/L2 w -").unwrap();
+    let pos = KidsShogiGame::from_fen("l2/G2/1e1/L2 w -").unwrap();
     let mv = Move::from_fen("b2a1").unwrap();
     let pos2 = pos.make_move_impl(&mv).unwrap();
     assert!(pos2.is_lost());
@@ -120,7 +120,7 @@ fn win_gote_on_lion_capture() {
 
 #[test]
 fn possible_moves_with_drops_sente() {
-    let pos = Position::from_fen("1l1/ge1/1C1/ELG b C").unwrap();
+    let pos = KidsShogiGame::from_fen("1l1/ge1/1C1/ELG b C").unwrap();
     let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
     moves.sort();
     let mut expected_moves = vec![
@@ -140,7 +140,7 @@ fn possible_moves_with_drops_sente() {
 
 #[test]
 fn possible_moves_with_drops_gote() {
-    let pos = Position::from_fen("1l1/ge1/1C1/ELG w c").unwrap();
+    let pos = KidsShogiGame::from_fen("1l1/ge1/1C1/ELG w c").unwrap();
     let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
     moves.sort();
     let mut expected_moves = vec![
@@ -159,7 +159,7 @@ fn possible_moves_with_drops_gote() {
 
 #[test]
 fn chicken_moves() {
-    let pos = Position::from_fen("3/3/1C1/3 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("3/3/1C1/3 b -").unwrap();
     let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
     moves.sort();
     let mut expected_moves = vec![
@@ -171,7 +171,7 @@ fn chicken_moves() {
 
 #[test]
 fn giraffe_moves() {
-    let pos = Position::from_fen("3/3/1G1/3 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("3/3/1G1/3 b -").unwrap();
     let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
     moves.sort();
     let mut expected_moves = vec![
@@ -183,7 +183,7 @@ fn giraffe_moves() {
 
 #[test]
 fn elephant_moves() {
-    let pos = Position::from_fen("3/3/1E1/3 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("3/3/1E1/3 b -").unwrap();
     let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
     moves.sort();
     let mut expected_moves = vec![
@@ -195,7 +195,7 @@ fn elephant_moves() {
 
 #[test]
 fn lion_moves() {
-    let pos = Position::from_fen("3/3/1L1/3 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("3/3/1L1/3 b -").unwrap();
     let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
     moves.sort();
     let mut expected_moves = vec![
@@ -207,7 +207,7 @@ fn lion_moves() {
 
 #[test]
 fn hen_moves() {
-    let pos = Position::from_fen("3/3/1H1/3 b -").unwrap();
+    let pos = KidsShogiGame::from_fen("3/3/1H1/3 b -").unwrap();
     let mut moves = pos.list_possible_moves().iter().map(|mv| mv.to_fen()).collect::<Vec<_>>();
     moves.sort();
     let mut expected_moves = vec![
@@ -219,7 +219,7 @@ fn hen_moves() {
 
 #[test]
 fn invalid_moves() {
-    let pos = Position::from_fen("1l1/ge1/1C1/ELG b C").unwrap();
+    let pos = KidsShogiGame::from_fen("1l1/ge1/1C1/ELG b C").unwrap();
     // from empty
     assert!(pos.make_move_impl(&Move::Step(Point(2,1), Point(2,2))).is_none());
     // from enemy location
@@ -239,8 +239,8 @@ fn invalid_moves() {
 #[test]
 fn encode_hand() {
     let fen = "gl1/1e1/3/ELG b Cc";
-    let pos = Position::from_fen(fen).unwrap();
-    let encode_len = Position::encode_length();
+    let pos = KidsShogiGame::from_fen(fen).unwrap();
+    let encode_len = KidsShogiGame::encode_length();
     assert_eq!(encode_len, 12*10 + 6*2 + 2);
     
     let encoded = pos.encode();
@@ -260,14 +260,14 @@ fn encode_hand() {
 
 #[test]
 fn simple_evaluator() {
-    let pos = Position::from_fen("gl1/1e1/3/ELG b Cc").unwrap();
+    let pos = KidsShogiGame::from_fen("gl1/1e1/3/ELG b Cc").unwrap();
     let eval = SimpleEvaluator{};
     assert_eq!(eval.evaluate_position(&pos), 0.0);  // equal material
 
-    let pos2 = Position::from_fen("gle/1C1/3/ELG w C").unwrap();
+    let pos2 = KidsShogiGame::from_fen("gle/1C1/3/ELG w C").unwrap();
     assert_eq!(eval.evaluate_position(&pos2), -1.0);  // opponent captured a chicken
 
-    let pos3 = Position::from_fen("l2/G2/3/L2 b -").unwrap();
+    let pos3 = KidsShogiGame::from_fen("l2/G2/3/L2 b -").unwrap();
     let mv = Move::from_fen("a3a4").unwrap();
     let pos4 = pos3.make_move_impl(&mv).unwrap();
     assert_eq!(eval.evaluate_position(&pos4), -eval.saturation());  // winning pos
