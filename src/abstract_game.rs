@@ -1,9 +1,18 @@
 // Traits describing abstract game
 
 pub trait AbstractGame : Sized + Clone {
+    /// Compact integer type used as a collision-free map key for positions.
+    /// Choose the smallest type that fits all reachable positions for the game
+    /// (e.g. u32 for tiny games, u64 for kid_shogi).
+    /// There is intentionally no `from_hash` — hashes are write-only keys.
+    type PositionHash: Eq + std::hash::Hash + Copy;
+
     fn possible_moves(self: &Self) -> Vec<String>;
     fn make_move(self: &Self, mv: &str) -> Option<Self>;
     fn to_str(self: &Self) -> String;
+    /// Encode this position as a `PositionHash`. Must be injective over all
+    /// reachable positions: distinct positions must produce distinct hashes.
+    fn to_hash(self: &Self) -> Self::PositionHash;
     fn is_lost(self: &Self) -> bool;
     fn current_player(self: &Self) -> i32;  // actually 0 or 1
     fn pretty_print(self: &Self) -> String;
@@ -54,8 +63,12 @@ pub mod tests {
                 None  // parse error
             }
         }
+        type PositionHash = u32;
         fn to_str(self: &Self) -> String {
             format!("{} {}", self.value, self.player)
+        }
+        fn to_hash(self: &Self) -> u32 {
+            (self.value as u32) << 1 | (self.player as u32)
         }
         fn pretty_print(self: &Self) -> String {
             self.to_str()

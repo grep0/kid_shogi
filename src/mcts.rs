@@ -6,19 +6,17 @@ use std::marker::PhantomData;
 use crate::abstract_game::{self as ag};
 use crate::strategy::{self, StrategyEngine};
 
-struct Node {
-    #[allow(dead_code)]
-    pos: String,
-    parents: HashSet<String>,
+struct Node<H: Eq + std::hash::Hash + Copy> {
+    parents: HashSet<H>,
     evaluation: f64,
     visits: usize,  // number of visits so far
     reward: f64,    // total reward collected
-    children: HashMap<String, String>,  // move->pos
+    children: HashMap<String, H>,  // move->pos_hash
     is_populated: bool,
 }
 
 struct MCTSState<PosT: ag::AbstractGame> {
-    nodes: HashMap<String, Node>,
+    nodes: HashMap<PosT::PositionHash, Node<PosT::PositionHash>>,
     phantom_data: PhantomData<PosT>,
 }
 
@@ -28,48 +26,44 @@ fn clamp(v: f64) -> f64 {
 
 impl<PosT: ag::AbstractGame> MCTSState<PosT> {
     fn make_node<EvalT: ag::Evaluator<PosT>>(&mut self, pos: &PosT, parent: Option<&PosT>, evaluator: &EvalT) {
-        let pos_str = pos.to_str();
-        if let Some(existing_node) = self.nodes.get_mut(&pos_str) {
+        let pos_hash = pos.to_hash();
+        if let Some(existing_node) = self.nodes.get_mut(&pos_hash) {
             if let Some(p) = parent {
-                existing_node.parents.insert(p.to_str());
+                existing_node.parents.insert(p.to_hash());
             }
             return
         }
         let n = Node{
-            pos: pos_str.clone(),
-            parents: parent.into_iter().map(ag::AbstractGame::to_str).collect(),
+            parents: parent.into_iter().map(ag::AbstractGame::to_hash).collect(),
             evaluation: clamp(evaluator.evaluate_position(pos) / evaluator.saturation()),
             visits: 0,
             reward: 0.0,
             children: HashMap::new(),
             is_populated: false,
         };
-        self.nodes.insert(pos_str, n);
+        self.nodes.insert(pos_hash, n);
     }
 
     fn populate_children<EvalT: ag::Evaluator<PosT>>(&mut self, pos: &PosT, evaluator: &EvalT) {
-        let pos_str = pos.to_str();
-        let parent_node = self.nodes.get(&pos_str).expect("parent node must exist");
+        let pos_hash = pos.to_hash();
+        let parent_node = self.nodes.get(&pos_hash).expect("parent node must exist");
         if parent_node.is_populated { return }
         let moves = pos.possible_moves();
-        //eprintln!("From pos {} possible moves {:?}", pos_str, moves);
         let children =
             moves.into_iter().map(|mv| {
                 let new_pos = pos.make_move(&mv).unwrap();
                 self.make_node(&new_pos, Some(pos), evaluator);
-                (mv, new_pos.to_str())
+                (mv, new_pos.to_hash())
             }).collect();
-        let parent_mut = self.nodes.get_mut(&pos_str).unwrap();
+        let parent_mut = self.nodes.get_mut(&pos_hash).unwrap();
         parent_mut.children = children;
         parent_mut.is_populated = true;
     }
 
     fn update_node(&mut self, pos: &PosT, reward: f64) {
-        let pos_str = pos.to_str();
-        let node = self.nodes.get_mut(&pos_str).expect("node must exist");
+        let node = self.nodes.get_mut(&pos.to_hash()).expect("node must exist");
         node.visits+=1;
         node.reward+=reward;
-        //eprintln!("Pos={} visits={} reward={}", pos_str, node.visits, node.reward);
     }
 
     #[allow(dead_code)]
@@ -77,24 +71,22 @@ impl<PosT: ag::AbstractGame> MCTSState<PosT> {
         let indents = String::from_utf8(vec![b' '; indent as usize]).unwrap();
         pos.possible_moves().into_iter().for_each(|mv| {
             let new_pos = pos.make_move(&mv).unwrap();
-            if let Some(node) = self.nodes.get(&new_pos.to_str()) {
+            if let Some(node) = self.nodes.get(&new_pos.to_hash()) {
                 eprintln!("{}{} {}({}) #{}", &indents, mv, node.reward, node.evaluation, node.visits);
                 if depth>0 {
                     self.print_move_tree(&new_pos, depth-1, indent+4);
                 }
             } else {
-                eprintln!("{}{} not vidited", &indents, mv);
+                eprintln!("{}{} not visited", &indents, mv);
             }
         });
-
     }
 
     fn choose_best_by_reward(&self, pos: &PosT) -> Option<String> {
         let moves = pos.possible_moves();
         let c = moves.into_iter().map(|mv| {
             let new_pos = pos.make_move(&mv).unwrap();
-            let reward = self.nodes.get(&new_pos.to_str()).unwrap().reward;
-            //eprintln!("mv={} visits={} reward={}", mv, self.nodes.get(&new_pos.to_str()).unwrap().visits, reward);
+            let reward = self.nodes.get(&new_pos.to_hash()).unwrap().reward;
             (mv, reward)
         }).min_by(|a, b| a.1.total_cmp(&b.1)).clone();
         match c {
@@ -109,17 +101,14 @@ impl<PosT: ag::AbstractGame> ag::Evaluator<PosT> for MCTSState<PosT> {
         return 1.0
     }
     fn evaluate_position(self: &Self, pos: &PosT) -> f64 {
-        let pos_str = pos.to_str();
-        if let Some(node) = self.nodes.get(&pos_str) {
+        if let Some(node) = self.nodes.get(&pos.to_hash()) {
             let parent_visits: usize = node.parents.iter().map(
                 |p| self.nodes.get(p).unwrap().visits).sum();
             let explore_bonus = (parent_visits as f64 + 1.0).ln() / ((node.visits+1) as f64);
             let eval_bonus = node.evaluation / ((node.visits+1) as f64);
             let avg_reward = if node.visits>0 {node.reward/(node.visits as f64)} else {0.0};
-            //eprintln!("Eval pos {} : {} eval_bonus {} explore_bonus {}", pos_str, avg_reward, eval_bonus, explore_bonus);
             avg_reward - eval_bonus - explore_bonus
         } else {
-            //eprintln!("No node for pos {}", pos_str);
             return 0.0
         }
     }

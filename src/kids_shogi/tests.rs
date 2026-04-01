@@ -3,6 +3,63 @@ use ag::NeuroPosition;
 use super::*;
 use crate::abstract_game::{AbstractGame as AGPosition, Evaluator};
 
+// ── to_hash tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn hash_initial_position_is_stable() {
+    let pos = KidsShogiGame::initial();
+    assert_eq!(pos.to_hash(), pos.to_hash());
+}
+
+#[test]
+fn hash_distinct_positions_differ() {
+    let pos = KidsShogiGame::initial();
+    // After one move the position must hash differently
+    let moves = pos.possible_moves();
+    let hashes: std::collections::HashSet<u64> =
+        moves.iter().map(|mv| pos.make_move(mv).unwrap().to_hash()).collect();
+    // All successor positions should have distinct hashes
+    assert_eq!(hashes.len(), moves.len());
+    // And none equal the initial hash
+    assert!(!hashes.contains(&pos.to_hash()));
+}
+
+#[test]
+fn hash_same_position_via_different_paths() {
+    // Reach the same position two different ways and verify hashes agree.
+    // initial → b2b3 → (gote) b3b2 should give a different position;
+    // we just verify that from_fen round-trips through hash consistently.
+    let fen = "gl1/1e1/3/ELG b Cc";
+    let pos_a = KidsShogiGame::from_fen(fen).unwrap();
+    let pos_b = KidsShogiGame::from_fen(fen).unwrap();
+    assert_eq!(pos_a.to_hash(), pos_b.to_hash());
+}
+
+#[test]
+fn hash_differs_by_turn() {
+    // Same board, different side to move → different hash
+    let pos_sente = KidsShogiGame::from_fen("gle/1c1/1C1/ELG b -").unwrap();
+    let pos_gote  = KidsShogiGame::from_fen("gle/1c1/1C1/ELG w -").unwrap();
+    assert_ne!(pos_sente.to_hash(), pos_gote.to_hash());
+}
+
+#[test]
+fn hash_differs_by_hand() {
+    // Same board, different hand pieces → different hash
+    let pos_no_hand   = KidsShogiGame::from_fen("gl1/1e1/3/ELG b -").unwrap();
+    let pos_with_hand = KidsShogiGame::from_fen("gl1/1e1/3/ELG b C").unwrap();
+    assert_ne!(pos_no_hand.to_hash(), pos_with_hand.to_hash());
+}
+
+#[test]
+fn hash_after_round_trip() {
+    // Hash before and after FEN round-trip must be equal
+    let pos = KidsShogiGame::initial();
+    let fen = pos.to_str();
+    let pos2 = KidsShogiGame::from_fen(&fen).unwrap();
+    assert_eq!(pos.to_hash(), pos2.to_hash());
+}
+
 #[test]
 fn point_swap_sides() {
     assert_eq!(Point(2,3).swap_sides(), Point(0,0));

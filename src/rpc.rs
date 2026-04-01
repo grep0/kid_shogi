@@ -205,7 +205,7 @@ use crate::{kids_shogi, mcts::MctsFactory};
 
 fn test_io() -> IoHandler {
     static EVAL: kids_shogi::SimpleEvaluator = kids_shogi::SimpleEvaluator {};
-    create_io_handler(MctsFactory::new(&EVAL, 1000, 3.0))
+    create_io_handler(MctsFactory::new(&EVAL, 1000, 3.0, 8))
 }
 
 #[test]

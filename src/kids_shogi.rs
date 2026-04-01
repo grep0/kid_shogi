@@ -488,8 +488,37 @@ impl ag::AbstractGame for KidsShogiGame {
             None
         }
     }
+    type PositionHash = u64;
+
     fn to_str(self: &Self) -> String {
         self.to_fen()
+    }
+
+    fn to_hash(self: &Self) -> u64 {
+        // Bit layout (LSB first):
+        //   bits  0..47 : 12 cells × 4 bits (0=empty, 1-5=SenteC/E/G/H/L, 6-10=GoteC/E/G/H/L)
+        //   bits 48..53 : Sente hand — 3 kinds × 2 bits (count 0-2)
+        //   bits 54..59 : Gote  hand — 3 kinds × 2 bits (count 0-2)
+        //   bit  60     : turn (0=Sente, 1=Gote)
+        let mut h: u64 = 0;
+        for (i, cell) in self.cells.iter().enumerate() {
+            let nibble: u64 = match cell {
+                Cell::Empty => 0,
+                Cell::Piece(pk, Color::Sente) => 1 + pk.index() as u64,
+                Cell::Piece(pk, Color::Gote)  => 6 + pk.index() as u64,
+            };
+            h |= nibble << (i * 4);
+        }
+        let mut bit = 48u64;
+        for hand in [&self.sente_hand, &self.gote_hand] {
+            for pk in PieceKind::IN_HAND {
+                let count = hand.iter().filter(|&&x| x == *pk).count() as u64;
+                h |= (count & 0x3) << bit;
+                bit += 2;
+            }
+        }
+        if self.current_player == Color::Gote { h |= 1 << 60; }
+        h
     }
     fn is_lost(self: &Self) -> bool {
         (*self).is_lost()
