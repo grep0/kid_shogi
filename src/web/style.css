@@ -73,7 +73,7 @@ h1 {
 #hand-gote     { order: 1; }
 #board         { order: 2; }
 #hand-sente    { order: 3; }
-#btn-new-game  { order: 4; }
+#btn-row       { order: 4; display: flex; gap: 0.6rem; margin-top: 1rem; }
 
 #status-bar {
   font-size: 1rem;
@@ -225,10 +225,10 @@ h1 {
 .record-col-sente { width: 76px; flex-shrink: 0; }
 .record-col-gote  { width: 76px; flex-shrink: 0; }
 
-/* ── New game button ──────────────────────────────────────── */
+/* ── New game + Rules buttons ─────────────────────────────── */
 
-#btn-new-game {
-  margin-top: 1rem;
+#btn-new-game,
+#btn-rules {
   padding: 0.5rem 1.2rem;
   font-size: 0.95rem;
   cursor: pointer;
@@ -236,6 +236,9 @@ h1 {
   border-radius: 6px;
   background: #fff8ee;
   color: #3a2a1a;
+  text-decoration: none;
+  display: inline-block;
 }
 
-#btn-new-game:hover { background: #ffe8c0; }
+#btn-new-game:hover,
+#btn-rules:hover { background: #ffe8c0; }
