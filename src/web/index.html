@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dōbutsu Shōgi</title>
+  <title>Let's Catch the Lion — Dōbutsu Shōgi</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
-    <h1>Dōbutsu Shōgi</h1>
+    <h1>Let's Catch the Lion — Dōbutsu Shōgi</h1>
 
     <div id="main">
     <div id="game-screen">
@@ -35,8 +35,8 @@
       <!-- Setup overlay: shown at start and after New Game -->
       <div id="setup-screen">
         <p>Play as:</p>
-        <button id="btn-play-first">Sente</button>
-        <button id="btn-play-second">Gote</button>
+        <button id="btn-play-first">Sente <span class="btn-sub">(moves first)</span></button>
+        <button id="btn-play-second">Gote <span class="btn-sub">(moves second)</span></button>
       </div>
 
       <div id="btn-row">
@@ -52,6 +52,60 @@
         <span class="record-col-gote">Gote</span>
       </div>
       <div id="record-list"></div>
+    </div>
+
+    <div id="rules-card">
+      <h2>Rules</h2>
+
+      <section>
+        <h3>Pieces</h3>
+        <table class="piece-table">
+          <tr>
+            <td><img src="assets/SenteL.svg" alt="Lion"></td>
+            <td><strong>Lion</strong></td>
+            <td>Any direction, 1 step</td>
+          </tr>
+          <tr>
+            <td><img src="assets/SenteG.svg" alt="Giraffe"></td>
+            <td><strong>Giraffe</strong></td>
+            <td>Orthogonal, 1 step</td>
+          </tr>
+          <tr>
+            <td><img src="assets/SenteE.svg" alt="Elephant"></td>
+            <td><strong>Elephant</strong></td>
+            <td>Diagonal, 1 step</td>
+          </tr>
+          <tr>
+            <td><img src="assets/SenteC.svg" alt="Chick"></td>
+            <td><strong>Chick</strong></td>
+            <td>Forward, 1 step</td>
+          </tr>
+          <tr>
+            <td><img src="assets/SenteH.svg" alt="Hen"></td>
+            <td><strong>Hen ★</strong></td>
+            <td>Orthogonal + forward diagonals</td>
+          </tr>
+        </table>
+        <p class="rules-note">★ Chick promotes to Hen upon reaching the far rank</p>
+      </section>
+
+      <section>
+        <h3>Captures &amp; Drops</h3>
+        <ul>
+          <li>Captured pieces go to <em>your</em> hand</li>
+          <li>On your turn you may <em>drop</em> a piece from hand onto any empty square instead of moving</li>
+          <li>Chicks may not be dropped on the last rank</li>
+          <li>Dropped Hens revert to Chicks</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Winning</h3>
+        <ul>
+          <li>Capture the opponent's <strong>Lion</strong>, or</li>
+          <li>Advance your <strong>Lion</strong> to the far rank and it is not captured on the next move</li>
+        </ul>
+      </section>
     </div>
 
     </div><!-- #main -->

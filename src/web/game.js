@@ -104,7 +104,26 @@ const state = {
   busy: false,        // waiting for server response
   record: [],         // [{ num, sente, gote }, …]
   halfMove: 0,        // 1-based half-move counter within current game
+  lastAiMove: null,   // move string of last AI move, for highlighting
 };
+
+// ─── Move formatting ─────────────────────────────────────────
+
+/** Format a move for display: "Cb2b3", "Cb2xb3", "C*b2" */
+function formatMove(mv, parsedBefore) {
+  if (mv.includes('*')) {
+    const [kindChar, toStr] = mv.split('*');
+    return `${kindChar.toUpperCase()}*${toStr}`;
+  }
+  const fromStr = mv.slice(0, 2);
+  const toStr   = mv.slice(2, 4);
+  const [fromCol, fromRow] = parseCoord(fromStr);
+  const [toCol,   toRow]   = parseCoord(toStr);
+  const piece    = parsedBefore.grid[rowNumToStringIndex(fromRow)][fromCol];
+  const target   = parsedBefore.grid[rowNumToStringIndex(toRow)][toCol];
+  const kind     = piece ? piece.kind : '?';
+  return `${kind}${fromStr}${target ? 'x' : ''}${toStr}`;
+}
 
 // ─── Game record ─────────────────────────────────────────────────────────────
 
@@ -221,6 +240,18 @@ function renderBoard() {
       if (isSelected) cell.classList.add('selected');
 
       if (reachable.has(coordStr)) cell.classList.add('reachable');
+
+      if (state.lastAiMove) {
+        const aiMv = state.lastAiMove;
+        if (aiMv.includes('*')) {
+          // Drop: highlight destination only
+          const toStr = aiMv.split('*')[1];
+          if (coordStr === toStr) cell.classList.add('last-move');
+        } else {
+          if (coordStr === aiMv.slice(0, 2) || coordStr === aiMv.slice(2, 4))
+            cell.classList.add('last-move');
+        }
+      }
 
       cell.addEventListener('click', () => onCellClick(col, rowNum));
       boardEl.appendChild(cell);
@@ -444,9 +475,10 @@ async function startGame(playerChoice) {
     const res = await rpcCall('start_game', { player: playerChoice });
     state.humanPlayer = playerChoice === 0 ? 'sente' : 'gote';
     state.gameId = res.game_id;
+    state.lastAiMove = res.last_move ?? null;
     applyServerResponse(res.position, res.possible_moves, null);
     if (res.last_move) {
-      recordMove(res.last_move, 'sente'); // AI played first as Sente
+      recordMove(formatMove(res.last_move, parsePosition(INITIAL_POSITION)), 'sente');
       setStatus(`AI played ${res.last_move}. Your turn.`);
     } else {
       setStatus('Your turn.');
@@ -463,11 +495,12 @@ async function sendHumanMove(mv) {
   setStatus('Thinking…');
 
   // ── 1. Capture rects and start human animation BEFORE any re-render ──
-  const humanAnim = buildMoveAnimation(mv, state.humanPlayer, state.parsed);
+  const parsedBeforeHuman = state.parsed;
+  const humanAnim = buildMoveAnimation(mv, state.humanPlayer, parsedBeforeHuman);
 
   // ── 2. Immediately render intermediate state so piece appears at destination
   //       when the overlay animation completes ──
-  const intermediate = applyMoveLocally(state.parsed, mv, state.humanPlayer);
+  const intermediate = applyMoveLocally(parsedBeforeHuman, mv, state.humanPlayer);
   state.parsed = intermediate;
   state.possibleMoves = [];
   renderBoard();
@@ -487,14 +520,15 @@ async function sendHumanMove(mv) {
   }
 
   // ── 4. Record human move, animate AI move ──
-  recordMove(mv, state.humanPlayer);
+  recordMove(formatMove(mv, parsedBeforeHuman), state.humanPlayer);
   const aiOwner = state.humanPlayer === 'sente' ? 'gote' : 'sente';
   if (res.last_move && !res.game_result) {
     await buildMoveAnimation(res.last_move, aiOwner, intermediate);
   }
 
   // ── 5. Apply final state ──
-  if (res.last_move) recordMove(res.last_move, aiOwner);
+  if (res.last_move) recordMove(formatMove(res.last_move, intermediate), aiOwner);
+  state.lastAiMove = res.last_move ?? null;
   applyServerResponse(res.position, res.possible_moves, res.game_result);
   if (res.game_result === 'YouWon')     setStatus('You won!');
   else if (res.game_result === 'IWon')  setStatus(`AI played ${res.last_move}. AI wins!`);
@@ -530,6 +564,7 @@ function showSetup() {
   state.busy = true; // prevent interaction
   state.record = [];
   state.halfMove = 0;
+  state.lastAiMove = null;
   renderRecord();
   renderBoard();
 }

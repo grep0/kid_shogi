@@ -43,7 +43,7 @@ enum GameResult {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct MakeMoveResponse {
     position: String,
-    last_move: String,
+    last_move: Option<String>,
     possible_moves: Vec<String>,
     game_result: Option<GameResult>,
 }
@@ -153,7 +153,7 @@ impl<PosT: AbstractGame + Send + 'static, FactoryT: StrategyFactory<PosT>> GameS
             self.registry.lock().unwrap().remove(&request.game_id);
             let response = MakeMoveResponse {
                 position: new_pos.to_str(),
-                last_move: request.move_,
+                last_move: None,
                 possible_moves: new_pos.possible_moves(),
                 game_result: Some(GameResult::YouWon),
             };
@@ -172,7 +172,7 @@ impl<PosT: AbstractGame + Send + 'static, FactoryT: StrategyFactory<PosT>> GameS
         };
         let response = MakeMoveResponse {
             position: my_new_pos.to_str(),
-            last_move: my_move,
+            last_move: Some(my_move),
             possible_moves: my_new_pos.possible_moves(),
             game_result,
         };
@@ -253,7 +253,7 @@ fn make_move() {
         move_val.get("result").unwrap().clone()).unwrap();
 
     // Server must reply with a valid position and a move
-    assert!(!move_resp.last_move.is_empty());
+    assert!(move_resp.last_move.is_some());
     assert!(move_resp.game_result.is_none(), "game should not be over yet");
     assert!(!move_resp.possible_moves.is_empty());
 

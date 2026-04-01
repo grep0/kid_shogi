@@ -60,6 +60,13 @@ h1 {
 
 #setup-screen button:hover { background: #ffe8c0; }
 
+.btn-sub {
+  display: block;
+  font-size: 0.75rem;
+  color: #7a5a2a;
+  font-weight: normal;
+}
+
 /* ── Status bar ───────────────────────────────────────────── */
 
 #game-screen {
@@ -131,6 +138,8 @@ h1 {
   cursor: pointer;
 }
 .cell.reachable:hover { background: #90c8f0; }
+
+.cell.last-move { background: rgba(255, 200, 0, 0.35); }
 
 .cell.reachable::after {
   content: '';
@@ -224,6 +233,70 @@ h1 {
 .record-col-num   { width: 28px; flex-shrink: 0; color: #7a5a2a; }
 .record-col-sente { width: 76px; flex-shrink: 0; }
 .record-col-gote  { width: 76px; flex-shrink: 0; }
+
+/* ── Rules cheatsheet card ────────────────────────────────── */
+
+#rules-card {
+  width: 210px;
+  background: #e8d0a8;
+  border: 2px solid #8b6340;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8rem;
+  color: #3a2a1a;
+  align-self: flex-start;
+  margin-top: 0.2rem;
+}
+
+#rules-card h2 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid #8b6340;
+  color: #3a2a1a;
+}
+
+#rules-card h3 {
+  font-size: 0.8rem;
+  margin: 0.55rem 0 0.25rem;
+  color: #5a3a1a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#rules-card section { margin-bottom: 0.3rem; }
+
+.piece-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.piece-table td {
+  padding: 1px 3px;
+  vertical-align: middle;
+}
+
+.piece-table td:first-child { width: 28px; }
+
+.piece-table img {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.rules-note {
+  font-size: 0.72rem;
+  color: #7a5a2a;
+  margin: 0.2rem 0 0;
+  font-style: italic;
+}
+
+#rules-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+#rules-card li { margin-bottom: 0.2rem; line-height: 1.35; }
 
 /* ── New game + Rules buttons ─────────────────────────────── */
 
