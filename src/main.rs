@@ -1,6 +1,6 @@
 use crate::strategy::StrategyEngine;
 use std::io::{stdin, stdout, Write};
-use abstract_game::{AbstractGame, Evaluator};
+use abstract_game::{AbstractGame, Evaluator, NeuroPosition};
 use clap::Parser;
 
 mod kids_shogi;
@@ -12,6 +12,8 @@ mod rpc;
 mod static_server;
 
 type GamePosition = kids_shogi::KidsShogiGame;
+const ENCODE_LEN: usize = <GamePosition as NeuroPosition>::ENCODE_LENGTH;
+type NeuroEval = neuro::NeuroEvaluator<GamePosition, ENCODE_LEN>;
 
 fn play_cmd_line<EngineT: StrategyEngine<GamePosition>>(human_player: i32, strat: &mut EngineT) {
     let mut pos = GamePosition::initial();
@@ -74,11 +76,15 @@ struct Argv {
     // Max tree depth per MCTS rollout
     #[arg(long, default_value_t = 8)]
     max_depth: i32,
+    // Path to neural network weights; if given, uses neuro evaluator instead of SimpleEvaluator
     #[arg(long)]
     model_file: Option<String>,
     #[arg(short='t', long)]
     train: bool,
-    // Engine mode: read a FEN position from stdin, print the chosen move to stdout, exit
+    // Number of training epochs to run (default 1)
+    #[arg(long, default_value_t = 1)]
+    max_epochs: usize,
+    // Engine mode: loop reading FEN lines, printing moves
     #[arg(short='e', long)]
     engine: bool,
     // Run JSON-RPC HTTP server instead of CLI game
@@ -92,69 +98,106 @@ struct Argv {
     web_root: std::path::PathBuf,
 }
 
-fn play_with_evaluator<EvalT: Evaluator<GamePosition>>(eval: &EvalT, args: &Argv) {
-    let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
-        eval, args.num_tries, args.softness, args.max_depth);
-    play_cmd_line(args.human_player, &mut strat);
+fn run_engine_loop<EvalT: Evaluator<GamePosition>>(eval: &EvalT, args: &Argv) {
+    use std::io::BufRead;
+    const MAX_HALF_MOVES: usize = 100;
+    let mut half_moves: usize = 0;
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let fen = line.expect("read error");
+        if half_moves >= MAX_HALF_MOVES {
+            println!("1/2-1/2");
+            break;
+        }
+        let pos = GamePosition::from_str(&fen).expect("invalid FEN");
+        let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
+            eval, args.num_tries, args.softness, args.max_depth);
+        let mv = strat.choose_move(&pos).expect("no moves");
+        let new_pos = pos.make_move(&mv).expect("chosen move must be valid");
+        half_moves += 1;
+        if new_pos.is_lost() {
+            let result = if new_pos.current_player() == 0 { "0-1" } else { "1-0" };
+            println!("{}", result);
+            break;
+        }
+        println!("{}", new_pos.to_str());
+    }
+}
+
+fn run_server<EvalT: Evaluator<GamePosition> + Send + Sync + 'static>(
+    eval: EvalT, args: &Argv,
+) {
+    let eval_ref: &'static EvalT = Box::leak(Box::new(eval));
+    let io = rpc::create_io_handler(
+        mcts::MctsFactory::new(eval_ref, args.num_tries, args.softness, args.max_depth));
+    let addr = args.listen.parse().expect("invalid listen address");
+    println!("Serving at http://{} (GUI: /, RPC: /rpc)", args.listen);
+    static_server::serve(io, args.web_root.clone(), addr);
 }
 
 fn main() {
     let args = Argv::parse();
-    const IN: usize = <GamePosition as abstract_game::NeuroPosition>::ENCODE_LENGTH;
+
+    // ── Training ──────────────────────────────────────────────────────────────
     if args.train {
         let model_file = args.model_file.as_deref().unwrap_or("ks.model");
         let params_file = format!("{}.params", model_file);
-        let mut nn: neuro::NeuroEvaluator<GamePosition, IN> =
-            neuro::load_model(model_file).unwrap_or_else(|_| neuro::NeuroEvaluator::new());
-        let params = neuro::load_params(&params_file).unwrap_or_default();
-        neuro::train(&mut nn, &params);
+        let mut nn: NeuroEval =
+            neuro::load_model(model_file)
+                .map(|m| { println!("Loaded model from {}", model_file); m })
+                .unwrap_or_else(|_| { println!("No model at {}, starting fresh", model_file); NeuroEval::new() });
+        let params = neuro::load_params(&params_file)
+            .map(|p| { println!("Loaded params from {}", params_file); p })
+            .unwrap_or_else(|_| { println!("Using default train parameters"); neuro::TrainParameters::default() });
+        println!("Parameters: {:?}", params);
+        println!("Max epochs: {}", args.max_epochs);
+        let eval = kids_shogi::SimpleEvaluator{};
+        for epoch in 0..args.max_epochs {
+            neuro::train_epoch(&eval, &mut nn, &params, epoch, model_file)
+                .expect("training failed");
+        }
         neuro::save_model(&nn, model_file).unwrap();
         neuro::save_params(&params, &params_file).unwrap();
+        println!("Final model saved to {}", model_file);
         return;
     }
-    if let Some(ref model_file) = args.model_file {
-        let nn: neuro::NeuroEvaluator<GamePosition, IN> = neuro::load_model(model_file).unwrap();
-        play_with_evaluator(&nn, &args);
-        return;
-    }
+
+    // ── Engine loop ───────────────────────────────────────────────────────────
     if args.engine {
-        // Loop protocol: read a FEN line, print the resulting FEN after our move.
-        // When the game ends, print "1-0" (Sente wins), "0-1" (Gote wins), or
-        // "1/2-1/2" (draw after MAX_HALF_MOVES half-moves without a result).
-        // The match runner feeds each engine's output directly into the other's input.
-        use std::io::BufRead;
-        const MAX_HALF_MOVES: usize = 100;
-        let mut half_moves: usize = 0;
-        let stdin = std::io::stdin();
-        for line in stdin.lock().lines() {
-            let fen = line.expect("read error");
-            if half_moves >= MAX_HALF_MOVES {
-                println!("1/2-1/2");
-                break;
-            }
-            let pos = GamePosition::from_str(&fen).expect("invalid FEN");
-            let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
-                &kids_shogi::SimpleEvaluator{}, args.num_tries, args.softness, args.max_depth);
-            let mv = strat.choose_move(&pos).expect("no moves");
-            let new_pos = pos.make_move(&mv).expect("chosen move must be valid");
-            half_moves += 1;
-            if new_pos.is_lost() {
-                // current_player of new_pos is the one who lost
-                let result = if new_pos.current_player() == 0 { "0-1" } else { "1-0" };
-                println!("{}", result);
-                break;
-            }
-            println!("{}", new_pos.to_str());
+        if let Some(ref model_file) = args.model_file {
+            let nn: NeuroEval = neuro::load_model(model_file)
+                .expect("failed to load model");
+            eprintln!("Engine: using neuro model from {}", model_file);
+            run_engine_loop(&nn, &args);
+        } else {
+            run_engine_loop(&kids_shogi::SimpleEvaluator{}, &args);
         }
         return;
     }
+
+    // ── HTTP server ───────────────────────────────────────────────────────────
     if args.server {
-        let addr = args.listen.parse().expect("invalid listen address");
-        static EVAL: kids_shogi::SimpleEvaluator = kids_shogi::SimpleEvaluator {};
-        let io = rpc::create_io_handler(mcts::MctsFactory::new(&EVAL, args.num_tries, args.softness, args.max_depth));
-        println!("Serving at http://{} (GUI: /, RPC: /rpc)", args.listen);
-        static_server::serve(io, args.web_root, addr);
+        if let Some(ref model_file) = args.model_file {
+            let nn: NeuroEval = neuro::load_model(model_file)
+                .expect("failed to load model");
+            println!("Server: using neuro model from {}", model_file);
+            run_server(nn, &args);
+        } else {
+            run_server(kids_shogi::SimpleEvaluator{}, &args);
+        }
         return;
     }
-    play_with_evaluator(&kids_shogi::SimpleEvaluator{}, &args);
+
+    // ── CLI game ──────────────────────────────────────────────────────────────
+    if let Some(ref model_file) = args.model_file {
+        let nn: NeuroEval = neuro::load_model(model_file)
+            .expect("failed to load model");
+        let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
+            &nn, args.num_tries, args.softness, args.max_depth);
+        play_cmd_line(args.human_player, &mut strat);
+    } else {
+        let mut strat = mcts::MonteCarloTreeSearchStrategy::new(
+            &kids_shogi::SimpleEvaluator{}, args.num_tries, args.softness, args.max_depth);
+        play_cmd_line(args.human_player, &mut strat);
+    }
 }

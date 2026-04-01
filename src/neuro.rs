@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::marker::PhantomData;
 
@@ -10,19 +11,21 @@ use dfdx::{
     tensor::Cpu,
     tensor_ops::Backward,
 };
+use rand::seq::SliceRandom;
 
 use crate::abstract_game::{self as ag, Evaluator};
 use crate::mcts::MonteCarloTreeSearchStrategy;
-use crate::strategy::{self, StrategyEngine};
+use crate::strategy::{FindWinningMoveStrategy, StrategyEngine};
 
 type Dev = Cpu;
 
 // IN → 1024 → ReLU → 256 → ReLU → 16 → ReLU → 1 → Tanh
-// Split into two 4-tuples because dfdx implements Module for tuples up to 6.
 type MlpConfig<const IN: usize> = (
     (Linear<IN, 1024>, ReLU, Linear<1024, 256>, ReLU),
-    (Linear<256, 16>, ReLU, Linear<16, 1>, Tanh),
+    (Linear<256, 16>,  ReLU, Linear<16, 1>,     Tanh),
 );
+
+// ── NeuroEvaluator ────────────────────────────────────────────────────────────
 
 pub struct NeuroEvaluator<PosT: ag::NeuroPosition, const IN: usize> {
     dev: Dev,
@@ -56,142 +59,302 @@ impl<PosT: ag::NeuroPosition, const IN: usize> ag::Evaluator<PosT> for NeuroEval
             .try_into()
             .expect("encode() length must equal IN");
         let input: Tensor<Rank1<IN>, f32, Dev> = self.dev.tensor(arr);
-        let output = self.model.forward(input);
-        output.array()[0] as f64
+        self.model.forward(input).array()[0] as f64
     }
 
     fn saturation(&self) -> f64 { 1.0 }
 }
 
-// ── Training ──────────────────────────────────────────────────────────────────
+// ── TrainParameters ───────────────────────────────────────────────────────────
 
-type Example = (Vec<f64>, f64);
-
-fn random_games<PosT: ag::NeuroPosition, StratT: StrategyEngine<PosT>>(
-    strat: &mut StratT,
-    num_games: usize,
-    max_moves: usize,
-    decay: f64,
-) -> Vec<Example> {
-    let mut examples = Vec::new();
-    for _ in 0..num_games {
-        let mut propagation: Vec<(Vec<f64>, i32)> = Vec::new();
-        let mut pos = PosT::initial();
-        for _ in 0..max_moves {
-            let Some(mv) = strat.choose_move(&pos) else { break };
-            propagation.push((pos.encode(), pos.current_player()));
-            pos = pos.make_move(&mv).unwrap();
-        }
-        let final_eval = strategy::OneStepEvaluator::<PosT>::new().evaluate_position(&pos);
-        let final_player = pos.current_player();
-        for (i, (encoded, player)) in propagation.iter().enumerate() {
-            let steps_from_end = (propagation.len() - i) as i32;
-            let target = if *player == final_player { final_eval } else { -final_eval };
-            examples.push((encoded.clone(), target * decay.powi(steps_from_end)));
-        }
-    }
-    examples
-}
-
-#[derive(serde::Deserialize, serde::Serialize, Debug)]
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
 pub struct TrainParameters {
+    /// Number of self-play games per epoch
+    pub games_per_epoch: usize,
+    /// MCTS rollouts per move during self-play
     pub mcts_tries: usize,
-    pub softness: f64,
-    pub max_depth: i32,
-    pub num_games: usize,
-    pub game_depth: usize,
+    /// MCTS softmax temperature
+    pub mcts_softness: f64,
+    /// MCTS tree depth cap
+    pub mcts_max_depth: i32,
+    /// Ply limit per game; beyond this the game is a draw
+    pub max_game_depth: usize,
+    /// Per-ply score decay from game end (e.g. 0.95)
     pub score_decay: f64,
-    pub train_once_epochs: usize,
-    pub train_sessions: usize,
+    /// Max positions sampled from database for training
+    pub training_subset: usize,
+    /// Mini-batch size (Adam updates per example within batch)
+    pub batch_size: usize,
+    /// Training passes over the sampled subset
+    pub training_epochs: usize,
 }
 
 impl Default for TrainParameters {
     fn default() -> Self {
         TrainParameters {
-            mcts_tries: 20,
-            softness: 3.0,
-            max_depth: 8,
-            num_games: 10,
-            game_depth: 50,
-            score_decay: 0.9,
-            train_once_epochs: 100,
-            train_sessions: 10,
+            games_per_epoch: 50,
+            mcts_tries: 1000,
+            mcts_softness: 3.0,
+            mcts_max_depth: 8,
+            max_game_depth: 50,
+            score_decay: 0.95,
+            training_subset: 5000,
+            batch_size: 64,
+            training_epochs: 20,
         }
     }
 }
 
-fn train_once<PosT: ag::NeuroPosition + 'static, const IN: usize>(
-    evaluator: &mut NeuroEvaluator<PosT, IN>,
+// ── Self-play ─────────────────────────────────────────────────────────────────
+
+enum PlayResult {
+    /// The given player index lost
+    Win { loser: i32 },
+    Draw,
+}
+
+/// Play one game using `eval` wrapped in FindWinningMove + MCTS.
+/// Returns (hash, encoding, score) for every position visited;
+/// score = ±decay^(distance_from_end), or 0.0 for draws.
+fn play_game<PosT, EvalT>(
+    eval: &EvalT,
     params: &TrainParameters,
-) {
-    println!("Collecting {} games...", params.num_games);
-    let examples = {
-        // SAFETY: evaluator lives for the duration of this block.
-        let eval_ref: &'static NeuroEvaluator<PosT, IN> =
-            unsafe { &*(evaluator as *const _) };
-        let mut strat = MonteCarloTreeSearchStrategy::new(
-            eval_ref, params.mcts_tries, params.softness, params.max_depth);
-        random_games::<PosT, _>(&mut strat, params.num_games, params.game_depth, params.score_decay)
-    };
-    println!("Training on {} examples...", examples.len());
+) -> (Vec<(PosT::PositionHash, Vec<f64>, f64)>, PlayResult)
+where
+    PosT: ag::NeuroPosition,
+    EvalT: ag::Evaluator<PosT>,
+{
+    let mcts = MonteCarloTreeSearchStrategy::new(
+        eval, params.mcts_tries, params.mcts_softness, params.mcts_max_depth);
+    let mut strat = FindWinningMoveStrategy::new(mcts);
 
-    let mut grads = evaluator.model.alloc_grads();
-    let mut opt = Adam::new(&evaluator.model, Default::default());
+    // (hash, encoding, player_at_pos)
+    let mut history: Vec<(PosT::PositionHash, Vec<f64>, i32)> = Vec::new();
+    let mut pos = PosT::initial();
 
-    for epoch in 0..params.train_once_epochs {
-        let mut total_loss = 0f32;
-        for (input_vec, target_val) in &examples {
-            let arr: [f32; IN] = input_vec.iter()
-                .map(|&x| x as f32)
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
-            let input: Tensor<Rank1<IN>, f32, Dev> = evaluator.dev.tensor(arr);
-            let target: Tensor<Rank1<1>, f32, Dev> = evaluator.dev.tensor([*target_val as f32]);
-
-            let pred = evaluator.model.forward_mut(input.trace(grads));
-            let loss = mse_loss(pred, target);
-            total_loss += loss.array();
-            grads = loss.backward();
-            opt.update(&mut evaluator.model, &grads).unwrap();
-            evaluator.model.zero_grads(&mut grads);
+    loop {
+        if pos.is_lost() {
+            let loser = pos.current_player();
+            let n = history.len();
+            let scored = history.into_iter().enumerate().map(|(i, (hash, enc, player))| {
+                let dist = (n - i) as i32;
+                let sign: f64 = if player == loser { -1.0 } else { 1.0 };
+                (hash, enc, sign * params.score_decay.powi(dist))
+            }).collect();
+            return (scored, PlayResult::Win { loser });
         }
-        if (epoch + 1) % 10 == 0 {
-            println!("  epoch {}/{}: avg loss {:.5}",
-                epoch + 1, params.train_once_epochs,
-                total_loss / examples.len() as f32);
+        if history.len() >= params.max_game_depth {
+            let scored = history.into_iter()
+                .map(|(hash, enc, _)| (hash, enc, 0.0))
+                .collect();
+            return (scored, PlayResult::Draw);
         }
+        history.push((pos.to_hash(), pos.encode(), pos.current_player()));
+        let Some(mv) = strat.choose_move(&pos) else {
+            // No moves without is_lost — shouldn't happen, treat as draw
+            let scored = history.into_iter()
+                .map(|(hash, enc, _)| (hash, enc, 0.0))
+                .collect();
+            return (scored, PlayResult::Draw);
+        };
+        pos = pos.make_move(&mv).unwrap();
     }
 }
 
-pub fn train<PosT: ag::NeuroPosition + 'static, const IN: usize>(
-    evaluator: &mut NeuroEvaluator<PosT, IN>,
+// ── Database ──────────────────────────────────────────────────────────────────
+
+struct DbEntry {
+    encoding: Vec<f64>,
+    score_sum: f64,
+    count:     u32,
+}
+
+impl DbEntry {
+    fn avg_score(&self) -> f64 { self.score_sum / self.count as f64 }
+}
+
+type Database<H> = HashMap<H, DbEntry>;
+
+fn db_insert<H: Eq + std::hash::Hash>(
+    db: &mut Database<H>,
+    hash: H,
+    encoding: Vec<f64>,
+    score: f64,
+) {
+    let entry = db.entry(hash).or_insert(DbEntry { encoding, score_sum: 0.0, count: 0 });
+    entry.score_sum += score;
+    entry.count += 1;
+}
+
+fn generate_database<PosT, EvalT>(
+    eval: &EvalT,
     params: &TrainParameters,
-) {
-    for session in 0..params.train_sessions {
-        println!("=== Session {}/{} ===", session + 1, params.train_sessions);
-        train_once(evaluator, params);
+) -> Database<PosT::PositionHash>
+where
+    PosT: ag::NeuroPosition,
+    EvalT: ag::Evaluator<PosT>,
+{
+    let mut db: Database<PosT::PositionHash> = HashMap::new();
+    let mut total_plies = 0usize;
+    let mut sente_wins = 0usize; // loser = player 1 (Gote)
+    let mut gote_wins  = 0usize; // loser = player 0 (Sente)
+    let mut draws      = 0usize;
+
+    println!("  Generating {} self-play games (mcts_tries={}, max_depth={})...",
+        params.games_per_epoch, params.mcts_tries, params.mcts_max_depth);
+
+    for g in 0..params.games_per_epoch {
+        let (positions, result) = play_game::<PosT, EvalT>(eval, params);
+        let plies = positions.len();
+        total_plies += plies;
+
+        let outcome_str = match &result {
+            PlayResult::Win { loser: 0 } => { gote_wins  += 1; "Gote wins " }
+            PlayResult::Win { .. }       => { sente_wins += 1; "Sente wins" }
+            PlayResult::Draw             => { draws       += 1; "draw      " }
+        };
+
+        for (hash, enc, score) in positions {
+            db_insert(&mut db, hash, enc, score);
+        }
+
+        println!("    Game {:3}/{}: {:3} plies, {} | DB: {} unique positions",
+            g + 1, params.games_per_epoch, plies, outcome_str, db.len());
+    }
+
+    let avg_score = db.values().map(|e| e.avg_score()).sum::<f64>() / db.len() as f64;
+    let avg_abs   = db.values().map(|e| e.avg_score().abs()).sum::<f64>() / db.len() as f64;
+
+    println!("  Self-play complete: {} total plies → {} unique positions",
+        total_plies, db.len());
+    println!("  Results: Sente-wins={} Gote-wins={} draws={}",
+        sente_wins, gote_wins, draws);
+    println!("  Score stats: mean={:.4}  mean(|score|)={:.4}", avg_score, avg_abs);
+
+    db
+}
+
+// ── Training ──────────────────────────────────────────────────────────────────
+
+fn train_on_database<PosT, const IN: usize>(
+    db: &Database<PosT::PositionHash>,
+    model: &mut NeuroEvaluator<PosT, IN>,
+    params: &TrainParameters,
+)
+where
+    PosT: ag::NeuroPosition,
+{
+    let mut rng = rand::thread_rng();
+
+    // Sample up to training_subset positions
+    let all_entries: Vec<&DbEntry> = db.values().collect();
+    let n_samples = params.training_subset.min(all_entries.len());
+    let sampled: Vec<&&DbEntry> = all_entries
+        .choose_multiple(&mut rng, n_samples)
+        .collect();
+
+    println!("  Training on {}/{} positions  (batch_size={}, epochs={})",
+        n_samples, db.len(), params.batch_size, params.training_epochs);
+
+    // Pre-convert to f32 once
+    let mut training_data: Vec<([f32; IN], f32)> = sampled.into_iter().map(|e| {
+        let arr: [f32; IN] = e.encoding.iter()
+            .map(|&x| x as f32)
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("encoding length must equal IN");
+        (arr, e.avg_score() as f32)
+    }).collect();
+
+    let mut grads = model.model.alloc_grads();
+    let mut opt   = Adam::new(&model.model, Default::default());
+
+    for epoch in 0..params.training_epochs {
+        training_data.shuffle(&mut rng);
+        let mut loss_sum  = 0f64;
+        let mut n_updates = 0usize;
+
+        for batch in training_data.chunks(params.batch_size) {
+            for (input_arr, target_val) in batch {
+                let input:  Tensor<Rank1<IN>, f32, Dev> = model.dev.tensor(*input_arr);
+                let target: Tensor<Rank1<1>,  f32, Dev> = model.dev.tensor([*target_val]);
+                let pred = model.model.forward_mut(input.trace(grads));
+                let loss = mse_loss(pred, target);
+                loss_sum  += loss.array() as f64;
+                n_updates += 1;
+                grads = loss.backward();
+                opt.update(&mut model.model, &grads).unwrap();
+                model.model.zero_grads(&mut grads);
+            }
+        }
+
+        let avg_loss = loss_sum / n_updates as f64;
+        // Log every epoch for visibility; mark first and last clearly
+        let marker = if epoch == 0 { " <start>" } else if epoch + 1 == params.training_epochs { " <end>" } else { "" };
+        println!("    Epoch {:3}/{}: avg_loss={:.6}{}",
+            epoch + 1, params.training_epochs, avg_loss, marker);
     }
 }
 
-pub fn load_model<PosT: ag::NeuroPosition, const IN: usize>(path: &str) -> io::Result<NeuroEvaluator<PosT, IN>> {
+// ── Public entry point ────────────────────────────────────────────────────────
+
+/// Run one training epoch:
+/// 1. Generate self-play games using `self_play_eval`
+/// 2. Aggregate into an in-memory position database
+/// 3. Train `model` on a sample of that database
+/// 4. Save checkpoint to `{model_file}.epoch{epoch}`
+pub fn train_epoch<PosT, EvalT, const IN: usize>(
+    self_play_eval: &EvalT,
+    model: &mut NeuroEvaluator<PosT, IN>,
+    params: &TrainParameters,
+    epoch: usize,
+    model_file: &str,
+) -> io::Result<()>
+where
+    PosT: ag::NeuroPosition,
+    EvalT: ag::Evaluator<PosT>,
+{
+    println!("\n=== Epoch {} ===", epoch);
+    println!("--- Self-play phase ---");
+    let db = generate_database::<PosT, EvalT>(self_play_eval, params);
+
+    println!("--- Training phase ---");
+    train_on_database::<PosT, IN>(&db, model, params);
+
+    let checkpoint = format!("{}.epoch{}", model_file, epoch);
+    model.save(&checkpoint)?;
+    println!("  Checkpoint saved → {}", checkpoint);
+
+    Ok(())
+}
+
+// ── File I/O ──────────────────────────────────────────────────────────────────
+
+pub fn load_model<PosT: ag::NeuroPosition, const IN: usize>(
+    path: &str,
+) -> io::Result<NeuroEvaluator<PosT, IN>> {
     let mut eval = NeuroEvaluator::new();
     eval.load_weights(path)?;
     Ok(eval)
 }
 
-pub fn save_model<PosT: ag::NeuroPosition, const IN: usize>(eval: &NeuroEvaluator<PosT, IN>, path: &str) -> io::Result<()> {
+pub fn save_model<PosT: ag::NeuroPosition, const IN: usize>(
+    eval: &NeuroEvaluator<PosT, IN>,
+    path: &str,
+) -> io::Result<()> {
     eval.save(path)
 }
 
 pub fn load_params(path: &str) -> io::Result<TrainParameters> {
     let file = std::fs::File::open(path)?;
     let reader = io::BufReader::new(file);
-    serde_json::from_reader(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    serde_json::from_reader(reader)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 pub fn save_params(params: &TrainParameters, path: &str) -> io::Result<()> {
     let file = std::fs::File::create(path)?;
     let writer = io::BufWriter::new(file);
-    serde_json::to_writer(writer, params).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    serde_json::to_writer_pretty(writer, params)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
