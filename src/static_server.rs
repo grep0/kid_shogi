@@ -7,6 +7,7 @@ use axum::{
     body::Body,
     extract::{Request, State},
     http::{header, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -20,11 +21,22 @@ pub fn serve(io: IoHandler, web_root: PathBuf, addr: SocketAddr) {
             .route("/rpc", post(rpc_handler))
             .route("/", get(static_handler))
             .route("/*path", get(static_handler))
+            .layer(middleware::from_fn(log_request))
             .with_state(state);
         let listener = tokio::net::TcpListener::bind(addr).await
             .expect("failed to bind server");
         axum::serve(listener, app).await.expect("server error");
     });
+}
+
+async fn log_request(req: Request<Body>, next: Next) -> Response {
+    let method = req.method().clone();
+    let path   = req.uri().path().to_owned();
+    let t0     = std::time::Instant::now();
+    let resp   = next.run(req).await;
+    println!("{} {} {} {}ms",
+        method, path, resp.status().as_u16(), t0.elapsed().as_millis());
+    resp
 }
 
 struct AppState {
