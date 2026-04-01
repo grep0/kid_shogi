@@ -102,7 +102,43 @@ const state = {
   selected: null,     // { type: 'board', col, row } | { type: 'hand', kind } | null
   gameResult: null,   // null | 'YouWon' | 'IWon' | 'Draw'
   busy: false,        // waiting for server response
+  record: [],         // [{ num, sente, gote }, …]
+  halfMove: 0,        // 1-based half-move counter within current game
 };
+
+// ─── Game record ─────────────────────────────────────────────────────────────
+
+function recordMove(mv, mover) {
+  state.halfMove += 1;
+  const num = Math.ceil(state.halfMove / 2);
+  if (mover === 'sente') {
+    state.record.push({ num, sente: mv, gote: null });
+  } else {
+    const last = state.record[state.record.length - 1];
+    if (last && last.gote === null) {
+      last.gote = mv;
+    } else {
+      state.record.push({ num, sente: null, gote: mv });
+    }
+  }
+  renderRecord();
+}
+
+function renderRecord() {
+  const list = $('record-list');
+  list.innerHTML = '';
+  for (const entry of state.record) {
+    const row = document.createElement('div');
+    row.className = 'record-row';
+    row.innerHTML =
+      `<span class="record-col-num">${entry.num}.</span>` +
+      `<span class="record-col-sente">${entry.sente ?? ''}</span>` +
+      `<span class="record-col-gote">${entry.gote ?? ''}</span>`;
+    list.appendChild(row);
+  }
+  // Scroll to bottom so latest move is visible
+  list.scrollTop = list.scrollHeight;
+}
 
 // ─── DOM helpers ─────────────────────────────────────────────────────────────
 
@@ -410,6 +446,7 @@ async function startGame(playerChoice) {
     state.gameId = res.game_id;
     applyServerResponse(res.position, res.possible_moves, null);
     if (res.last_move) {
+      recordMove(res.last_move, 'sente'); // AI played first as Sente
       setStatus(`AI played ${res.last_move}. Your turn.`);
     } else {
       setStatus('Your turn.');
@@ -449,13 +486,15 @@ async function sendHumanMove(mv) {
     return;
   }
 
-  // ── 4. Animate AI move using the already-rendered intermediate board ──
+  // ── 4. Record human move, animate AI move ──
+  recordMove(mv, state.humanPlayer);
   const aiOwner = state.humanPlayer === 'sente' ? 'gote' : 'sente';
   if (res.last_move && !res.game_result) {
     await buildMoveAnimation(res.last_move, aiOwner, intermediate);
   }
 
-  // ── 4. Apply final state ──
+  // ── 5. Apply final state ──
+  if (res.last_move) recordMove(res.last_move, aiOwner);
   applyServerResponse(res.position, res.possible_moves, res.game_result);
   if (res.game_result === 'YouWon')     setStatus('You won!');
   else if (res.game_result === 'IWon')  setStatus(`AI played ${res.last_move}. AI wins!`);
@@ -489,6 +528,9 @@ function showSetup() {
   state.selected = null;
   state.gameResult = null;
   state.busy = true; // prevent interaction
+  state.record = [];
+  state.halfMove = 0;
+  renderRecord();
   renderBoard();
 }
 

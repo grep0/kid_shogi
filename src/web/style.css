@@ -13,6 +13,13 @@ body {
   text-align: center;
 }
 
+#main {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+
 h1 {
   font-size: 1.6rem;
   margin-bottom: 1.5rem;
@@ -181,6 +188,42 @@ h1 {
 .hand-piece.selectable { cursor: pointer; }
 .hand-piece.selectable:hover { filter: brightness(1.15); }
 .hand-piece.selected { outline: 3px solid #4a8a20; border-radius: 4px; }
+
+/* ── Game record ──────────────────────────────────────────── */
+
+#game-record {
+  width: 200px;
+  max-height: 520px;
+  overflow-y: auto;
+  background: #e8d0a8;
+  border: 2px solid #8b6340;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: #3a2a1a;
+  margin-top: 0.2rem;
+}
+
+#record-header {
+  display: flex;
+  padding: 0.3rem 0.5rem;
+  background: #c8a870;
+  border-bottom: 1px solid #8b6340;
+  font-weight: bold;
+  position: sticky;
+  top: 0;
+}
+
+.record-row {
+  display: flex;
+  padding: 0.15rem 0.5rem;
+}
+
+.record-row:nth-child(even) { background: rgba(0,0,0,0.05); }
+
+.record-col-num   { width: 28px; flex-shrink: 0; color: #7a5a2a; }
+.record-col-sente { width: 76px; flex-shrink: 0; }
+.record-col-gote  { width: 76px; flex-shrink: 0; }
 
 /* ── New game button ──────────────────────────────────────── */
 

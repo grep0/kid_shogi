@@ -10,6 +10,7 @@
   <div id="app">
     <h1>Dōbutsu Shōgi</h1>
 
+    <div id="main">
     <div id="game-screen">
       <div id="status-bar"></div>
 
@@ -40,6 +41,17 @@
 
       <button id="btn-new-game">New Game</button>
     </div>
+
+    <div id="game-record">
+      <div id="record-header">
+        <span class="record-col-num">#</span>
+        <span class="record-col-sente">Sente</span>
+        <span class="record-col-gote">Gote</span>
+      </div>
+      <div id="record-list"></div>
+    </div>
+
+    </div><!-- #main -->
   </div>
 
   <script src="game.js"></script>
