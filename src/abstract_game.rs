@@ -22,8 +22,8 @@ pub trait AbstractGame : Sized + Clone {
 }
 
 pub trait NeuroPosition : AbstractGame {
-    fn encode(self: &Self) -> Vec<f64>;  // for neuro
-    fn encode_length() -> usize;
+    const ENCODE_LENGTH: usize;
+    fn encode(self: &Self) -> Vec<f64>;
 }
 
 pub trait StrategyFactory<PosT: AbstractGame + Send + 'static>: Send + Sync {
@@ -94,11 +94,9 @@ pub mod tests {
     }
 
     impl NeuroPosition for OneTwoGame {
+        const ENCODE_LENGTH: usize = 1;
         fn encode(self: &Self) -> Vec<f64> {
             vec![self.value as f64]
-        }
-        fn encode_length() -> usize {
-            1
         }
     }
 }

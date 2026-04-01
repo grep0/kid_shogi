@@ -6,7 +6,7 @@ use clap::Parser;
 mod kids_shogi;
 mod abstract_game;
 mod strategy;
-// mod neuro;
+mod neuro;
 mod mcts;
 mod rpc;
 mod static_server;
@@ -100,8 +100,22 @@ fn play_with_evaluator<EvalT: Evaluator<GamePosition>>(eval: &EvalT, args: &Argv
 
 fn main() {
     let args = Argv::parse();
-    if args.train || args.model_file.is_some() {
-        unimplemented!("neural network support is temporarily disabled");
+    const IN: usize = <GamePosition as abstract_game::NeuroPosition>::ENCODE_LENGTH;
+    if args.train {
+        let model_file = args.model_file.as_deref().unwrap_or("ks.model");
+        let params_file = format!("{}.params", model_file);
+        let mut nn: neuro::NeuroEvaluator<GamePosition, IN> =
+            neuro::load_model(model_file).unwrap_or_else(|_| neuro::NeuroEvaluator::new());
+        let params = neuro::load_params(&params_file).unwrap_or_default();
+        neuro::train(&mut nn, &params);
+        neuro::save_model(&nn, model_file).unwrap();
+        neuro::save_params(&params, &params_file).unwrap();
+        return;
+    }
+    if let Some(ref model_file) = args.model_file {
+        let nn: neuro::NeuroEvaluator<GamePosition, IN> = neuro::load_model(model_file).unwrap();
+        play_with_evaluator(&nn, &args);
+        return;
     }
     if args.engine {
         // Loop protocol: read a FEN line, print the resulting FEN after our move.
@@ -142,20 +156,5 @@ fn main() {
         static_server::serve(io, args.web_root, addr);
         return;
     }
-    // TODO: when re-enabling neuro, restore mod neuro and the train/model_file branches:
-    // if args.train {
-    //     let model_file = args.model_file.unwrap();
-    //     let params_file = model_file.clone() + ".params";
-    //     let mut nn = neuro::load_model(&model_file)
-    //         .unwrap_or(neuro::NeuroEvaluator::<GamePosition>::new());
-    //     let params = neuro::load_params(&params_file).unwrap_or(neuro::TrainParameters::default());
-    //     neuro::train(&mut nn, &params);
-    //     neuro::save_model(&nn, &model_file).unwrap();
-    //     neuro::save_params(&params, &params_file).unwrap();
-    // } else if let Some(model_file) = &args.model_file {
-    //     let neuro_eval = neuro::load_model(&model_file).unwrap();
-    //     play_with_evaluator(&neuro_eval, &args);
-    // } else {
     play_with_evaluator(&kids_shogi::SimpleEvaluator{}, &args);
-    // }
 }

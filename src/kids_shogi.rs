@@ -611,9 +611,8 @@ impl ag::NeuroPosition for KidsShogiGame {
         field.append(&mut delta(2, self.current_player as usize));
         field
     }
-    fn encode_length() -> usize {
-        KidsShogiGame::CELL_COUNT*PieceKind::COUNT*2 + PieceKind::IN_HAND_COUNT*2*2 + 2
-    }
+    const ENCODE_LENGTH: usize =
+        KidsShogiGame::CELL_COUNT*PieceKind::COUNT*2 + PieceKind::IN_HAND_COUNT*2*2 + 2;
 }
 
 // Simple evaluator counts the values of pieces on board and in hand 

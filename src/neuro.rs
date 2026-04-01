@@ -1,158 +1,197 @@
-use std::io::{self, Read, Write};
-use std::fs;
+use std::io;
 use std::marker::PhantomData;
 
-use nn;
-use serde;
+use dfdx::{
+    losses::mse_loss,
+    nn::builders::*,
+    optim::{Adam, Optimizer},
+    prelude::*,
+    shapes::Rank1,
+    tensor::Cpu,
+    tensor_ops::Backward,
+};
 
 use crate::abstract_game::{self as ag, Evaluator};
-use crate::strategy::{self,StrategyEngine};
 use crate::mcts::MonteCarloTreeSearchStrategy;
+use crate::strategy::{self, StrategyEngine};
 
-pub struct NeuroEvaluator<PosT: ag::NeuroPosition> {
-    nn: nn::NN,
-    phantom_data: PhantomData<PosT>,
+type Dev = Cpu;
+
+// IN → 1024 → ReLU → 256 → ReLU → 16 → ReLU → 1 → Tanh
+// Split into two 4-tuples because dfdx implements Module for tuples up to 6.
+type MlpConfig<const IN: usize> = (
+    (Linear<IN, 1024>, ReLU, Linear<1024, 256>, ReLU),
+    (Linear<256, 16>, ReLU, Linear<16, 1>, Tanh),
+);
+
+pub struct NeuroEvaluator<PosT: ag::NeuroPosition, const IN: usize> {
+    dev: Dev,
+    model: <MlpConfig<IN> as BuildOnDevice<Dev, f32>>::Built,
+    _phantom: PhantomData<PosT>,
 }
 
-impl <PosT: ag::NeuroPosition> NeuroEvaluator<PosT> {
+impl<PosT: ag::NeuroPosition, const IN: usize> NeuroEvaluator<PosT, IN> {
     pub fn new() -> Self {
-        // we need factory to find the valency of input layers
-        let input_deg = PosT::encode_length();
-        // hardcode internal layers for now
-        Self{
-            nn: nn::NN::new(&[input_deg as u32, 1024, 256, 16, 1]),
-            phantom_data: PhantomData
-        }
+        let dev = Dev::default();
+        let model = dev.build_module::<MlpConfig<IN>, f32>();
+        Self { dev, model, _phantom: PhantomData }
     }
 
-    fn save(self: &Self, outf: &mut fs::File) -> Result<(), std::io::Error> {
-        let encoded = self.nn.to_json();
-        outf.write(encoded.as_bytes())?;
-        Ok(())
+    pub fn save(&self, path: &str) -> io::Result<()> {
+        self.model.save_safetensors(path)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))
     }
 
-    fn load(inf: &mut fs::File) -> Result<Self, std::io::Error> {
-        let mut buf = Vec::<u8>::new();
-        inf.read_to_end(&mut buf)?;
-        match String::from_utf8(buf) {
-            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-            Ok(sbuf) => Ok(Self {
-                nn: nn::NN::from_json(&sbuf),
-                phantom_data: PhantomData
-            })
-        }
+    pub fn load_weights(&mut self, path: &str) -> io::Result<()> {
+        self.model.load_safetensors(path)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))
     }
 }
 
-impl <PosT: ag::NeuroPosition> ag::Evaluator<PosT> for NeuroEvaluator<PosT> {
-    fn evaluate_position(self: &Self, pos: &PosT) -> f64 {
-        let res = self.nn.run(&pos.encode()[..]);
-        res[0].tanh()
+impl<PosT: ag::NeuroPosition, const IN: usize> ag::Evaluator<PosT> for NeuroEvaluator<PosT, IN> {
+    fn evaluate_position(&self, pos: &PosT) -> f64 {
+        let arr: [f32; IN] = pos.encode().into_iter()
+            .map(|x| x as f32)
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("encode() length must equal IN");
+        let input: Tensor<Rank1<IN>, f32, Dev> = self.dev.tensor(arr);
+        let output = self.model.forward(input);
+        output.array()[0] as f64
     }
-    fn saturation(self: &Self) -> f64 {
-        1.0
-    }
+
+    fn saturation(&self) -> f64 { 1.0 }
 }
 
-type Example = (Vec<f64>, Vec<f64>);
+// ── Training ──────────────────────────────────────────────────────────────────
+
+type Example = (Vec<f64>, f64);
 
 fn random_games<PosT: ag::NeuroPosition, StratT: StrategyEngine<PosT>>(
-        strat: &mut StratT,
-        num_games: usize, max_moves: usize, decay: f64) -> Vec<Example> {
-    let mut examples = Vec::<Example>::new();
+    strat: &mut StratT,
+    num_games: usize,
+    max_moves: usize,
+    decay: f64,
+) -> Vec<Example> {
+    let mut examples = Vec::new();
     for _ in 0..num_games {
-        // forward: make n moves with current evaluator
-        let mut propagation: Vec<(Vec<f64>, i32, f64)> = Vec::<(Vec<f64>, i32, f64)>::new();
-        let mut current_pos = PosT::initial();
+        let mut propagation: Vec<(Vec<f64>, i32)> = Vec::new();
+        let mut pos = PosT::initial();
         for _ in 0..max_moves {
-            let mv = strat.choose_move(&current_pos);
-            if mv.is_none() { break }
-            let encoded_pos = current_pos.encode();
-            propagation.push((encoded_pos, current_pos.current_player(), 0.0));
-            current_pos = current_pos.make_move(&mv.unwrap()).unwrap();
-            println!("  current_pos: {:?}", current_pos.to_str());
+            let Some(mv) = strat.choose_move(&pos) else { break };
+            propagation.push((pos.encode(), pos.current_player()));
+            pos = pos.make_move(&mv).unwrap();
         }
-        let onestep = strategy::OneStepEvaluator::<PosT>::new();
-        let final_eval = onestep.evaluate_position(&current_pos);
-        println!("final eval {}", final_eval);
-        for i in 0..propagation.len() {
-            let decayed_eval = final_eval * decay.powi((propagation.len()-i) as i32);
-            propagation[i].2 = if propagation[i].1==current_pos.current_player() {decayed_eval} else {-decayed_eval}
+        let final_eval = strategy::OneStepEvaluator::<PosT>::new().evaluate_position(&pos);
+        let final_player = pos.current_player();
+        for (i, (encoded, player)) in propagation.iter().enumerate() {
+            let steps_from_end = (propagation.len() - i) as i32;
+            let target = if *player == final_player { final_eval } else { -final_eval };
+            examples.push((encoded.clone(), target * decay.powi(steps_from_end)));
         }
-        //println!("propagation: {:?}", propagation);
-        examples.append(
-            &mut propagation.into_iter().map(|(pos, _, eval)| (pos, vec![eval])).collect()
-        );
-    };
+    }
     examples
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 pub struct TrainParameters {
-    mtsc_tries: usize,
-    softness: f64,
-    num_games: usize,
-    game_depth: usize,
-    score_decay: f64,
-    train_once_epochs: usize,
-    train_sessions: usize
+    pub mcts_tries: usize,
+    pub softness: f64,
+    pub max_depth: i32,
+    pub num_games: usize,
+    pub game_depth: usize,
+    pub score_decay: f64,
+    pub train_once_epochs: usize,
+    pub train_sessions: usize,
 }
 
 impl Default for TrainParameters {
     fn default() -> Self {
         TrainParameters {
-            mtsc_tries: 20,
+            mcts_tries: 20,
             softness: 3.0,
+            max_depth: 8,
             num_games: 10,
-            game_depth: 10,
-            score_decay: 0.8,
+            game_depth: 50,
+            score_decay: 0.9,
             train_once_epochs: 100,
-            train_sessions: 10
+            train_sessions: 10,
         }
     }
 }
 
-fn train_once<PosT: ag::NeuroPosition>(eval: &mut NeuroEvaluator<PosT>, params: &TrainParameters) {
-    println!("Collecting examples...");
+fn train_once<PosT: ag::NeuroPosition + 'static, const IN: usize>(
+    evaluator: &mut NeuroEvaluator<PosT, IN>,
+    params: &TrainParameters,
+) {
+    println!("Collecting {} games...", params.num_games);
     let examples = {
-        let eval_ref = &*eval;
-        let mut strat = MonteCarloTreeSearchStrategy::new(eval_ref, params.mtsc_tries, params.softness);
-        random_games(&mut strat, params.num_games, params.game_depth, params.score_decay)
+        // SAFETY: evaluator lives for the duration of this block.
+        let eval_ref: &'static NeuroEvaluator<PosT, IN> =
+            unsafe { &*(evaluator as *const _) };
+        let mut strat = MonteCarloTreeSearchStrategy::new(
+            eval_ref, params.mcts_tries, params.softness, params.max_depth);
+        random_games::<PosT, _>(&mut strat, params.num_games, params.game_depth, params.score_decay)
     };
-    println!("Training...");
-    eval.nn.train(&examples).halt_condition(nn::HaltCondition::Epochs(params.train_once_epochs as u32)).go();
-}
+    println!("Training on {} examples...", examples.len());
 
-#[allow(dead_code)]
-pub fn train<PosT: ag::NeuroPosition>(eval: &mut NeuroEvaluator<PosT>, params: &TrainParameters) {
-    for _ in 0..params.train_sessions {
-        train_once(eval, params);
+    let mut grads = evaluator.model.alloc_grads();
+    let mut opt = Adam::new(&evaluator.model, Default::default());
+
+    for epoch in 0..params.train_once_epochs {
+        let mut total_loss = 0f32;
+        for (input_vec, target_val) in &examples {
+            let arr: [f32; IN] = input_vec.iter()
+                .map(|&x| x as f32)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+            let input: Tensor<Rank1<IN>, f32, Dev> = evaluator.dev.tensor(arr);
+            let target: Tensor<Rank1<1>, f32, Dev> = evaluator.dev.tensor([*target_val as f32]);
+
+            let pred = evaluator.model.forward_mut(input.trace(grads));
+            let loss = mse_loss(pred, target);
+            total_loss += loss.array();
+            grads = loss.backward();
+            opt.update(&mut evaluator.model, &grads).unwrap();
+            evaluator.model.zero_grads(&mut grads);
+        }
+        if (epoch + 1) % 10 == 0 {
+            println!("  epoch {}/{}: avg loss {:.5}",
+                epoch + 1, params.train_once_epochs,
+                total_loss / examples.len() as f32);
+        }
     }
 }
 
-pub fn load_model<PosT: ag::NeuroPosition>(filename: &str) -> Result<NeuroEvaluator<PosT>, io::Error> {
-    let mut file = fs::File::open(filename)?;
-    return NeuroEvaluator::load(&mut file)
-}
-
-pub fn load_params(filename: &str) -> Result<TrainParameters, io::Error> {
-    let file = fs::File::open(filename)?;
-    let mut reader = io::BufReader::new(file);
-    let params = serde_json::from_reader(&mut reader)?;
-    Ok(params)
-}
-
-pub fn save_model<PosT: ag::NeuroPosition>(
-        nn: &NeuroEvaluator<PosT>, filename: &str) -> Result<(), io::Error> {
-    let mut file = fs::File::create(filename)?;
-    return nn.save(&mut file)
-}
-
-pub fn save_params(params: &TrainParameters, filename: &str) -> Result<(), io::Error> {
-    let file = fs::File::create(filename)?;
-    let writer = io::BufWriter::new(&file);
-    match serde_json::to_writer(writer, params) {
-        Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
-        Ok(()) => Ok(())
+pub fn train<PosT: ag::NeuroPosition + 'static, const IN: usize>(
+    evaluator: &mut NeuroEvaluator<PosT, IN>,
+    params: &TrainParameters,
+) {
+    for session in 0..params.train_sessions {
+        println!("=== Session {}/{} ===", session + 1, params.train_sessions);
+        train_once(evaluator, params);
     }
+}
+
+pub fn load_model<PosT: ag::NeuroPosition, const IN: usize>(path: &str) -> io::Result<NeuroEvaluator<PosT, IN>> {
+    let mut eval = NeuroEvaluator::new();
+    eval.load_weights(path)?;
+    Ok(eval)
+}
+
+pub fn save_model<PosT: ag::NeuroPosition, const IN: usize>(eval: &NeuroEvaluator<PosT, IN>, path: &str) -> io::Result<()> {
+    eval.save(path)
+}
+
+pub fn load_params(path: &str) -> io::Result<TrainParameters> {
+    let file = std::fs::File::open(path)?;
+    let reader = io::BufReader::new(file);
+    serde_json::from_reader(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+pub fn save_params(params: &TrainParameters, path: &str) -> io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let writer = io::BufWriter::new(file);
+    serde_json::to_writer(writer, params).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
