@@ -84,15 +84,16 @@ impl<PosT: ag::AbstractGame> MCTSState<PosT> {
 
     fn choose_best_by_reward(&self, pos: &PosT) -> Option<String> {
         let moves = pos.possible_moves();
-        let c = moves.into_iter().map(|mv| {
-            let new_pos = pos.make_move(&mv).unwrap();
-            let reward = self.nodes.get(&new_pos.to_hash()).unwrap().reward;
-            (mv, reward)
-        }).min_by(|a, b| a.1.total_cmp(&b.1)).clone();
-        match c {
-            Some((mv, _)) => Some(mv),
-            None => None
-        }
+        // Only rank moves whose child nodes were actually visited; fall back to
+        // first legal move if the tree search somehow left all children unvisited.
+        let best = moves.iter()
+            .filter_map(|mv| {
+                let new_pos = pos.make_move(mv).unwrap();
+                let reward = self.nodes.get(&new_pos.to_hash())?.reward;
+                Some((mv.clone(), reward))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        best.map(|(mv, _)| mv).or_else(|| moves.into_iter().next())
     }
 }
 
